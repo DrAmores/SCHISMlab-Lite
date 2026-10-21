@@ -6,7 +6,9 @@ _NAMES = {
     "mesh_real": ("malla con costa real", "real-coastline mesh"),
     "mesh_lonlat": ("malla en lon/lat", "lon/lat mesh"),
     "inundation": ("inundación", "flooding"),
-    "era5": ("atmósfera ERA5", "ERA5 atmosphere"),
+    "era5": ("atmósfera real (ERA5 o ficheros propios)", "real atmosphere (ERA5 or own files)"),
+    "pressure": ("perturbación de presión (meteotsunami)", "pressure disturbance (meteotsunami)"),
+    "rain": ("lluvia sobre la malla", "rain over the mesh"),
     "rivers": ("ríos", "rivers"),
     "bc3d": ("contornos 3D o anidamiento", "3D boundaries or nesting"),
     "tides_global": ("mareas globales (GOT, FES)", "global tides (GOT, FES)"),
@@ -40,8 +42,12 @@ def pro_feature_keys(cfg: dict) -> list[str]:
         out.append("inundation")
     if fc.get("atmosphere"):
         out.append("era5")
+    if fc.get("pressure_disturbance"):
+        out.append("pressure")
     if fc.get("rivers"):
         out.append("rivers")
+    if fc.get("rain"):
+        out.append("rain")
     if isinstance(bc, dict) and bc.get("source") not in (None, "none", {}, False):
         out.append("bc3d")
     if _uses_global_tides(bc):

@@ -243,11 +243,12 @@ class RunSetup:
     # ------------------------------------------------------------------ forzamientos
     def rivers(self):
         """Ríos (fuentes de volumen, T y S): forcing.rivers."""
-        rivers = (self.cfg.get("forcing") or {}).get("rivers") or []
-        if not rivers:
+        fc = self.cfg.get("forcing") or {}
+        rivers = fc.get("rivers") or []
+        if not rivers and not fc.get("rain"):
             self.param["if_source"] = 0
             return
-        keys = pro("forcing.sources", "ríos / rivers").write_sources(self.dir, self.m, rivers, self.rnday, self.geographic)
+        keys = pro("forcing.sources", "ríos y lluvia / rivers and rain").write_case_sources(self)
         if rivers:
             log.info("%d rios como fuentes: %s", len(rivers), ", ".join(str(r.get("name", "?")) for r in rivers))
         self.param.update({k: v for k, v in keys.items() if k != "nramp_ss"})
@@ -256,13 +257,23 @@ class RunSetup:
         fc = (self.cfg.get("forcing") or {})
         self.rivers()
         atm = fc.get("atmosphere")
-        if atm and atm.get("source") == "era5":
+        pdist = fc.get("pressure_disturbance")                    # meteotsunami: perturbación de presión (SCHISMlab Pro)
+        if atm and atm.get("source") in ("era5", "file"):
+            if pdist:
+                raise ValueError("forcing.pressure_disturbance no se puede combinar con forcing.atmosphere: usa viento uniforme, "
+                                 "por expresión o como esfuerzo (o mete la perturbación en tus ficheros atmosféricos)")
             if fc.get("wind"):
-                log.warning("forcing.wind se ignora: el viento viene de ERA5 (forcing.atmosphere)")
-            self._era5(atm)
+                log.warning("forcing.wind se ignora: el viento viene de forcing.atmosphere (%s)", atm.get("source"))
+            if atm.get("source") == "era5":
+                self._era5(atm)
+            else:
+                pro("setup_pro", "atmósfera de ficheros propios / own atmospheric files").atmos_file(self, atm)
             return
         w = fc.get("wind")
         if not w:
+            if pdist:
+                pro("forcing.meteotsunami", "perturbación de presión / pressure disturbance").write(self, pdist)
+                return
             self.param["nws"] = 0
             return
         formula = int(w.get("formula", 1))
@@ -284,6 +295,10 @@ class RunSetup:
                 return evaluate(cx, **kw), evaluate(cy, **kw)
         ramp = float(w.get("ramp_days", 0.0))
         dt_h = float(w.get("dt_hours", 1.0))
+        if pdist:                                                 # viento del caso en la rejilla de la perturbación
+            pro("forcing.meteotsunami", "perturbación de presión / pressure disturbance").write(self, pdist, uv, ramp, formula)
+            self.param.update(ihconsv=0, isconsv=0)
+            return
         self.param.update(drampwind=ramp, iwind_form=formula, wtiminc=dt_h * 3600.0)
         write_gr3(self.dir / "windrot_geo2proj.gr3", self.m, values=0.0, boundaries=False)
         spatial = any(uses(e, n) for e in (cx, cy) for n in ("x", "y", "lon", "lat"))

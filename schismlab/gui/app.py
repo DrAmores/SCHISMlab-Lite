@@ -1878,7 +1878,11 @@ def page_forcing():
         if not has_open:
             ui.label(t["no_open_boundaries"]).classes("q-pa-sm rounded-borders text-body2 " + ("bg-orange-10" if S().get("dark") else "bg-orange-1 text-orange-10"))
         PRO = is_pro()
-        exp_keys = ["atm", "tides", "bc3d", "waves", "rivers"] if PRO else ["atm", "tides"]   # 3D, oleaje y ríos: SCHISMlab Pro
+        exp_keys = ["atm", "tides", "meteo", "bc3d", "waves", "rivers"] if PRO else ["atm", "tides"]   # meteotsunami, 3D, oleaje y ríos: Pro
+        _pg = None
+        if PRO:
+            from ..edition import pro as _pro
+            _pg = _pro("gui.forcing")                          # piezas de Forzamientos de SCHISMlab Pro
         _pro_used = [k for k, used in (("ERA5", bool(fc.get("atmosphere"))), (t["tab_bc3d"], bool(bc.get("source"))), (t["tab_waves"], bool((c.get("waves") or {}).get("enabled"))),
                                         (t["tab_rivers"], bool(fc.get("rivers")))) if used]
         if not PRO and _pro_used:
@@ -1890,13 +1894,13 @@ def page_forcing():
         if want_tab not in exp_keys:
             want_tab = "atm"
         lang_ = S().get("lang", "es")
-        _icons = {"atm": "air", "tides": "waves", "bc3d": "public", "waves": "tsunami", "rivers": "water"}
+        _icons = {"atm": "air", "tides": "waves", "meteo": "speed", "bc3d": "public", "waves": "tsunami", "rivers": "water"}
         exp = {k: ui.expansion(t["tab_" + k], icon=_icons[k], value=(k == want_tab)).classes("sl-exp w-full") for k in exp_keys}
         with exp["atm"]:
             with ui.column().classes("w-full"):
                 w = fc.get("wind"); atm = fc.get("atmosphere")
-                cur = "era5" if atm else ("stress" if w and w.get("stress") is not None else "expr" if w and any(isinstance(w.get(k), str) for k in ("u", "v")) else "uniform" if w else "none")
-                _wopts = {"none": t["w_none"], "uniform": t["w_uniform"], "expr": t["w_expr"], "stress": t["w_stress"], **({"era5": t["w_era5"]} if PRO else {})}
+                cur = (atm.get("source", "era5") if atm.get("source") in ("era5", "file") else "era5") if atm else ("stress" if w and w.get("stress") is not None else "expr" if w and any(isinstance(w.get(k), str) for k in ("u", "v")) else "uniform" if w else "none")
+                _wopts = {"none": t["w_none"], "uniform": t["w_uniform"], "expr": t["w_expr"], "stress": t["w_stress"], **({"era5": t["w_era5"], **_pg.atmos_options(t)} if PRO else {})}
                 if cur not in _wopts:
                     cur = "none"
                 _st = (w or {}).get("stress") or {}
@@ -1915,10 +1919,11 @@ def page_forcing():
                     u.set_visibility(wk.value in ("uniform", "expr")); v.set_visibility(wk.value in ("uniform", "expr"))
                     tau_x.set_visibility(wk.value == "stress"); tau_y.set_visibility(wk.value == "stress"); wformula.set_visibility(wk.value in ("uniform", "expr", "stress"))
                     wramp.set_visibility(wk.value in ("uniform", "expr", "stress")); wdt.set_visibility(wk.value in ("uniform", "expr", "stress"))
-                    heat.set_visibility(wk.value == "era5"); precip.set_visibility(wk.value == "era5")
+                    heat.set_visibility(wk.value in ("era5", "file")); precip.set_visibility(wk.value in ("era5", "file"))
                 def _wk_ramp(e):                                # otro tipo de viento: su rampa por defecto (la del YAML si es el tipo guardado)
                     wramp.set_value(float((w or {}).get("ramp_days", _ramp_def(cur))) if e.value == cur and w else _ramp_def(e.value))
                 wk.on_value_change(_wk_ramp)
+                atm_file_collect = _pg.atmos_file_box(t, atm, wk) if PRO else None
                 wk.on_value_change(lambda e: visw()); visw()
         with exp["tides"]:
             with ui.column().classes("w-full"):
@@ -1993,7 +1998,9 @@ def page_forcing():
                 def _sp_vis():
                     for w_ in (sp_w, sp_tau, sp_eta): w_.set_visibility(sp_mode.value == "on")
                 sp_mode.on_value_change(lambda e: _sp_vis()); _sp_vis()
-        if PRO:                                             # contornos 3D, oleaje y ríos: SCHISMlab Pro
+        if PRO:                                             # meteotsunami, contornos 3D, oleaje y ríos: SCHISMlab Pro
+            with exp["meteo"]:
+                pd_collect = _pg.pressure_box(t, fc, set_caption, exp["meteo"], geographic=is_geographic_cfg(c))
             with exp["bc3d"]:
                 with ui.column().classes("w-full"):
                     pass
@@ -2054,7 +2061,10 @@ def page_forcing():
                             for i, r in enumerate(rivers):
                                 with ui.row().classes("items-center q-gutter-sm"):
                                     ui.label(str(r.get("name", f"río {i + 1}"))).classes("text-weight-bold").style("width:110px")
-                                    for key, lab, w in (("lon", "lon", "w-24"), ("lat", "lat", "w-24"), ("flow", t["flow"], "w-32"), ("temperature", "T (°C)", "w-20"), ("salinity", "S (psu)", "w-24")):
+                                    for key, lab, w in (("lon", "lon", "w-24"), ("lat", "lat", "w-24")):
+                                        ui.input(lab, value=str(r.get(key, ""))).props("dense").classes(w).on_value_change(lambda e, r=r, key=key: r.__setitem__(key, _parse_value(e.value)))
+                                    _pg.river_flow_widget(t, r, _parse_value)                 # número/expresión, serie CSV o GloFAS
+                                    for key, lab, w in (("temperature", "T (°C)", "w-20"), ("salinity", "S (psu)", "w-24")):
                                         ui.input(lab, value=str(r.get(key, ""))).props("dense").classes(w).on_value_change(lambda e, r=r, key=key: r.__setitem__(key, _parse_value(e.value)))
                                     ui.button(icon="delete", on_click=lambda _, i=i: (rivers.pop(i), render_rivers())).props("flat dense round")
                     render_rivers()
@@ -2063,6 +2073,7 @@ def page_forcing():
                         ui.button(t["add_station"], icon="add", on_click=lambda: (rivers.append({"name": rsel.value, **CATALOG[rsel.value]}), render_rivers())).props("flat")
                         rname = ui.input(t["name"]).props("dense").classes("sl-w-sm")
                         ui.button(t["add_custom"], icon="add_location", on_click=lambda: (rivers.append({"name": rname.value or "río", "lon": round(float(cfg().get("mesh", {}).get("polygon", [[0, 0]])[0][0]), 2), "lat": round(float(cfg().get("mesh", {}).get("polygon", [[0, 0]])[0][1]), 2), "flow": 10.0, "temperature": 15.0, "salinity": 0.5}), render_rivers())).props("flat")
+                rain_collect = _pg.rain_box(t, fc, (c.get("mesh") or {}).get("resolution", {}).get("regions", []) or [])   # lluvia sobre la malla
         def collect():
             c2 = cfg(); f2 = {}
             def num(s):
@@ -2076,6 +2087,8 @@ def page_forcing():
                 f2["wind"]["dt_hours"] = float(wdt.value)
             elif wk.value == "era5":
                 f2["atmosphere"] = {"source": "era5", "heat": bool(heat.value), "precipitation": bool(precip.value)}
+            if PRO:
+                atm_file_collect(f2, heat, precip); pd_collect(f2); rain_collect(f2, _parse_value)
             if PRO and rivers:
                 f2["rivers"] = [dict(r) for r in rivers]
             c2["forcing"] = f2
@@ -2995,9 +3008,18 @@ def _results_content(tab_key: str):
             ui.tooltip(t["results_stamp"].format(when=_when, n=len(list((_src / "outputs" if (_src / "outputs").is_dir() else _src).glob("out2d_*.nc"))), t0=_t0, t1=_t1, nt=ds.time.size)).style("max-width:420px;font-size:12px")
         tab_keys = ["maps", "spectrum", "particles", "compare"] + (["validate"] if is_pro() else []) \
             + (["impacts"] if is_pro() and ((c.get("mesh", {}) or {}).get("inundation") or (wd / "impactos").exists()) else []) + ["report"]   # validar e impactos: Pro
+        _pro_tabs = []
+        if is_pro():                                          # pestañas de SCHISMlab Pro (meteotsunami...)
+            from ..edition import pro as _pro
+            _pro_tabs = _pro("gui.results").extra_tabs(c, wd, t)
         with ui.tabs().classes("w-full").props("dense no-caps mobile-arrows") as rtabs:
             rtab = {k: ui.tab(t["tab_" + k]) for k in tab_keys}
+            for _k, _lab, _ in _pro_tabs:
+                rtab[_k] = ui.tab(_lab)
         rpanels = ui.tab_panels(rtabs, value=rtab.get(tab_key, rtab["maps"])).classes("w-full")
+        for _k, _lab, _draw in _pro_tabs:
+            with rpanels, ui.tab_panel(rtab[_k]):
+                _draw(ds, c, wd, t, S().get("lang", "es"), dark=bool(S().get("dark")))
         with rpanels, ui.tab_panel(rtab["maps"]):
             from .explorer import explorer_tab
             lang_ = S().get("lang", "es")

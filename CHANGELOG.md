@@ -3,6 +3,10 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.4.2 (2026-10-21)
+
+- Sin cambios en SCHISMlab Lite (versión de mantenimiento, a la par con SCHISMlab Pro).
+
 ## 0.4.1 (2026-10-21) — las prácticas, enteras desde la interfaz
 
 - **Caudal en los contornos**: en Forzamientos → Mareas y nivel, «Velocidad en los contornos forzados» admite un
