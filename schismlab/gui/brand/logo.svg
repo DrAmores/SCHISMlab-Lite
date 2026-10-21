@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 112" width="520" height="112" role="img" aria-label="SCHISMlab">
+  <circle cx="22" cy="22" r="4" fill="#2b2b2b"/><circle cx="56" cy="22" r="4" fill="#2b2b2b"/><circle cx="90" cy="22" r="4" fill="#2b2b2b"/>
+  <circle cx="22" cy="56" r="4" fill="#2b2b2b"/><circle cx="56" cy="56" r="8" fill="#2b2b2b"/><circle cx="90" cy="56" r="8" fill="#2b2b2b"/>
+  <circle cx="22" cy="90" r="4" fill="#2b2b2b"/><circle cx="56" cy="90" r="8" fill="#2b2b2b"/><circle cx="90" cy="90" r="16" fill="#0e9aa7"/>
+  <text x="130" y="76" font-family="Space Grotesk, Helvetica, Arial, sans-serif" font-size="58" font-weight="700" letter-spacing="-1.5" fill="#2b2b2b">SCHISM<tspan font-weight="400" fill="#0e9aa7">lab</tspan></text>
+</svg>

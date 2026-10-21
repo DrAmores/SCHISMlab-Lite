@@ -1,0 +1,17 @@
+name: Propuesta de mejora
+description: Algo que te gustaría que hiciera SCHISMlab o que fuera distinto
+title: "[mejora] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: que
+    attributes:
+      label: ¿Qué te gustaría?
+      description: Qué quieres poder hacer y para qué (práctica, análisis, tipo de simulación).
+    validations:
+      required: true
+  - type: textarea
+    id: como
+    attributes:
+      label: ¿Cómo te lo imaginas en la interfaz?
+      placeholder: "Un botón en Resultados que..."

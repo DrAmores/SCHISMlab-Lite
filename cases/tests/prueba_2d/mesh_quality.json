@@ -1,0 +1,13 @@
+{
+  "nodes": 231,
+  "elements": 400,
+  "edge_min_m": 1000.0,
+  "edge_median_m": 1000.0,
+  "edge_max_m": 1414.213562373095,
+  "min_angle_deg": 45.00000000000001,
+  "elements_angle_lt_20": 0,
+  "depth_min": 50.0,
+  "depth_max": 50.0,
+  "dt_cfl_min_s": 45.15236409857309,
+  "dt_cfl_p5_s": 45.15236409857309
+}

@@ -1,0 +1,39 @@
+site_name: SCHISMlab Lite
+site_description: Simular el océano con SCHISM, paso a paso (UIB / IMEDEA)
+repo_url: https://github.com/DrAmores/SCHISMlab-Lite
+theme:
+  name: material
+  language: es
+  logo: img/symbol.svg
+  favicon: img/favicon.svg
+  font: {text: Space Grotesk, code: JetBrains Mono}
+  palette:
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle: {icon: material/weather-night, name: Modo oscuro}
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle: {icon: material/weather-sunny, name: Modo claro}
+  features: [navigation.sections, navigation.top, content.code.copy, search.suggest]
+markdown_extensions:
+  - admonition
+  - tables
+  - toc
+  - pymdownx.superfences
+  - pymdownx.details
+  - attr_list
+  - pymdownx.arithmatex:
+      generic: true
+extra_javascript:
+  - https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.js
+nav:
+  - Inicio: index.md
+  - Instalación: instalacion.md
+  - Guía del estudiante: guia_estudiante.md
+  - El fichero del caso (YAML): yaml.md
+  - Identidad visual: marca.md
+
+extra_css:
+  - stylesheets/brand.css

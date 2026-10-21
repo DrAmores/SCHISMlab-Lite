@@ -1,0 +1,17 @@
+# Comprobación de la instalación (2D): cuenca cerrada de 50 m con una elevación inicial que oscila (seiche).
+#   Sirve para verificar que mallado, setup y ejecución funcionan; corre en segundos.
+name: prueba_2d
+mesh:
+  generator: idealized
+  Lx: 20000
+  Ly: 10000
+  dx: 1000
+  bathymetry: 50
+  open_sides: []
+vertical: {type: 2d}
+time: {start: 2020-01-01, days: 0.05, dt: 30, ramp_days: 0}
+physics: {baroclinic: false, coriolis: none}
+initial: {elevation: "0.5*cos(pi*x/20000)", temperature: 20, salinity: 36}
+forcing: {}
+boundaries: {elevation: none}
+output: {interval_minutes: 5, variables: [elevation, depthAverageVel]}

@@ -1,0 +1,86 @@
+[workspace]
+name = "schismlab"
+version = "0.1.0"
+description = "Entorno docente para simular con SCHISM de cero / Teaching environment to run SCHISM from scratch"
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-64", "osx-arm64"]
+
+# ---------------------------------------------------------------------------
+# Toolchain para compilar SCHISM (Fortran + MPI + NetCDF). Identico en Linux,
+# WSL2 y mac; pixi lo resuelve y bloquea en pixi.lock.
+# ---------------------------------------------------------------------------
+[dependencies]
+python = "3.12.*"
+cmake = ">=3.25,<4"   # SCHISM 5.13 aun usa politicas retiradas en CMake 4
+make = "*"
+c-compiler = "*"
+cxx-compiler = "*"
+fortran-compiler = "*"
+openmpi = ">=4.1"
+openmpi-mpifort = "*"
+hdf5 = "*"
+libnetcdf = "*"
+netcdf-fortran = "*"
+pkg-config = "*"
+# Python cientifico base (analisis y preproceso)
+numpy = ">=2"
+scipy = "*"
+xarray = "*"
+dask = "*"
+netcdf4 = "*"
+matplotlib = "*"
+pyproj = "*"
+pyyaml = "*"
+rich = "*"
+plotly = "*"
+typer = "*"
+# Mallas y geodatos (dependencias de ocsmesh desde conda-forge para no mezclar ruedas de PyPI)
+numba = "*"
+pyarrow = "*"
+utm = "*"
+jigsawpy = "*"
+python-gmsh = "*"
+rioxarray = "*"
+geopandas = "*"
+shapely = "*"
+rasterio = "*"
+fiona = "*"
+rtree = "*"
+requests = "*"
+cdsapi = "*"
+copernicusmarine = "*"
+pytmd = "*"
+fabric = "*"
+paramiko = "*"
+streamlit = ">=1.45,<1.50"   # con streamlit 1.5x + starlette 1.x fallan las imagenes (/media -> 500)
+tqdm = "*"
+jupyterlab = "*"
+ffmpeg = "*"
+pillow = "*"
+pytest = "*"
+pytest-asyncio = "*"
+mako = ">=1.4.3,<2"
+
+[tasks]
+build-schism = "bash install/build_schism.sh"
+build-swash = "bash install/build_swash.sh"
+build-xbeach = "bash install/build_xbeach.sh"
+build-wave-models = "bash install/build_wave_models.sh"
+test-run = "bash install/run_test.sh"
+fix-rpath = "python -m schismlab.prebuilt --fix-rpath"   # binarios precompilados: apuntar al entorno pixi local
+test = "pytest -q --ignore=tests/test_gui.py"
+test-gui = "pytest -q tests/test_gui.py"
+docs = "mkdocs build --strict"
+docs-serve = "mkdocs serve"
+
+[target.linux-64.dependencies]
+alsa-lib = "*"   # libasound para el chromium de playwright (capturas de la interfaz)
+patchelf = ">=0.19.2,<0.20"
+
+[pypi-dependencies]
+mkdocs-material = "*"
+nicegui = ">=2.0"   # interfaz grafica (Quasar/Vue + Leaflet + Plotly)
+playwright = "*"   # capturas de la interfaz (tests/docs)
+ocsmesh = "*"
+triangle = "*"   # binding Python de Triangle (motor alternativo de OCSMesh)
+schismlab-lite = { path = ".", editable = true }

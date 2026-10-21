@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Guía del estudiante
+    url: https://github.com/DrAmores/SCHISMlab-Lite/blob/main/docs/guia_estudiante.md
+    about: Antes de abrir una incidencia, mira si la guía responde a la duda.

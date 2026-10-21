@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 112" width="600" height="112" role="img" aria-label="SCHISMlab Lite">
+  <circle cx="22" cy="22" r="4" fill="#2b2b2b"/><circle cx="56" cy="22" r="4" fill="#2b2b2b"/><circle cx="90" cy="22" r="4" fill="#2b2b2b"/>
+  <circle cx="22" cy="56" r="4" fill="#2b2b2b"/><circle cx="56" cy="56" r="8" fill="#2b2b2b"/><circle cx="90" cy="56" r="8" fill="#2b2b2b"/>
+  <circle cx="22" cy="90" r="4" fill="#2b2b2b"/><circle cx="56" cy="90" r="8" fill="#2b2b2b"/><circle cx="90" cy="90" r="16" fill="#0e9aa7"/>
+  <text x="130" y="76" font-family="Space Grotesk, Helvetica, Arial, sans-serif" font-size="58" font-weight="700" letter-spacing="-1.5" fill="#2b2b2b">SCHISM<tspan font-weight="400" fill="#0e9aa7">lab</tspan></text>
+  <rect x="504" y="30" width="88" height="40" rx="8" fill="none" stroke="#0e9aa7" stroke-width="3"/>
+  <text x="548.0" y="59" text-anchor="middle" font-family="Space Grotesk, Helvetica, Arial, sans-serif" font-size="26" font-weight="700" fill="#0e9aa7">Lite</text>
+</svg>

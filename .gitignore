@@ -1,0 +1,12 @@
+.pixi/
+__pycache__/
+*.pyc
+*.nc
+outputs/
+.ipynb_checkpoints/
+cases/examples/*/
+cases/teaching/*/
+site/
+
+# almacenamiento de sesiones de NiceGUI (por usuario, no se versiona)
+.nicegui/

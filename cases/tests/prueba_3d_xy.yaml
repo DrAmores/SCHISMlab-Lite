@@ -1,0 +1,23 @@
+# Comprobación de la instalación (3D, SCHISMlab Lite): cuenca cerrada en metros, 6 niveles sigma, dos capas de temperatura en reposo.
+#   Verifica la malla vertical, el hotstart y las salidas 3D; corre en menos de un minuto.
+name: prueba_3d_xy
+mesh:
+  generator: idealized
+  Lx: 40000
+  Ly: 28000
+  dx: 4000
+  bathymetry: 100
+  open_sides: []
+vertical: {type: sigma, nvrt: 6, h_c: 5, theta_b: 0, theta_f: 0.001}
+time: {start: 2020-01-01, days: 0.05, dt: 60, ramp_days: 0}
+reference: {lon0: 0.0, lat0: 40.0}
+physics: {baroclinic: true, turbulence: 0, coriolis: f-plane}
+initial:
+  elevation: 0
+  temperature: "where(z > -50, 20, 15)"
+  salinity: 36
+  recipe:
+    temperature: {mode: layers, v_top: 20, v_bot: 15, depth: 50, slope_m: 0, axis: x, pos: 0.5, width_km: 10}
+forcing: {}
+boundaries: {elevation: none}
+output: {interval_minutes: 10, variables: [elevation, horizontalVel, temperature, salinity, zCoordinates]}

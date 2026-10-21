@@ -1,0 +1,37 @@
+name: CI
+on:
+  push: {branches: [main]}
+  pull_request:
+  workflow_dispatch:
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: prefix-dev/setup-pixi@v0.8.10
+        with:
+          cache: true
+      - name: Tests de la libreria
+        run: pixi run test
+      - name: Cache de SCHISM compilado
+        uses: actions/cache@v4
+        with:
+          path: ~/.schismlab/bin
+          key: schism-${{ runner.os }}-${{ hashFiles('install/build_schism.sh') }}-v5.13.0
+      - name: Diagnostico del toolchain (mac)
+        if: runner.os == 'macOS'
+        run: |
+          pixi run bash -c 'which mpifort gfortran mpicc cmake; mpifort --version | head -1; mpifort -show; echo "module m; integer :: i; end module" > /tmp/m.f90; mkdir -p /tmp/inc; cd /tmp && mpifort -c m.f90 -J inc -o m.o; ls -la /tmp/inc /tmp/*.mod 2>&1; sw_vers'
+      - name: Compilar SCHISM
+        run: test -x ~/.schismlab/bin/pschism_hydro || pixi run build-schism
+      - name: Caso de prueba (seiche)
+        run: NP=2 pixi run test-run
+      - name: Caso docente Ekman (setup + run)
+        run: |
+          pixi run schismlab setup cases/tests/prueba_2d.yaml
+          pixi run schismlab run cases/tests/prueba_2d.yaml --cores 2

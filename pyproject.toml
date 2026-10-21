@@ -1,0 +1,21 @@
+[project]
+name = "schismlab-lite"
+version = "0.4.0"
+description = "Entorno docente para simular con SCHISM de cero"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+schismlab = "schismlab.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["schismlab"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests", "pro/tests"]   # pro/tests solo existe en el repositorio de desarrollo y en SCHISMlab Pro
+markers = ["module_under_test"]

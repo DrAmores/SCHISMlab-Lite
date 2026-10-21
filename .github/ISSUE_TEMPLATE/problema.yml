@@ -1,0 +1,39 @@
+name: Problema (bug)
+description: Algo no funciona o da error
+title: "[problema] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "Gracias por avisar. Cuanto más concreto, antes se arregla. Lo más útil: qué hiciste, qué esperabas y qué pasó."
+  - type: textarea
+    id: que
+    attributes:
+      label: ¿Qué ha pasado?
+      description: Qué hiciste (paso de la interfaz, botón, caso), qué esperabas y qué ha ocurrido. Pega el mensaje de error tal cual.
+      placeholder: "En Resultados, al pulsar Animar sección con el caso ekman, sale: ..."
+    validations:
+      required: true
+  - type: textarea
+    id: pasos
+    attributes:
+      label: Pasos para reproducirlo
+      placeholder: "1. Abrir el caso X  2. Ir a Malla  3. Pulsar Generar malla"
+  - type: input
+    id: version
+    attributes:
+      label: Versión de SCHISMlab y sistema
+      description: Lo rellena el botón «Informar de un problema» de la interfaz (versión, commit, sistema operativo).
+      placeholder: "0.2.0 (abc1234) · Linux (WSL2) · Python 3.12"
+  - type: textarea
+    id: registro
+    attributes:
+      label: Registro (últimas líneas)
+      description: Lo que salía en la terminal o en el registro de la interfaz. Se formatea como código automáticamente.
+      render: shell
+  - type: textarea
+    id: caso
+    attributes:
+      label: Caso (YAML)
+      description: Si el problema depende del caso, pega aquí su YAML (~/.schismlab/cases/<nombre>.yaml).
+      render: yaml
