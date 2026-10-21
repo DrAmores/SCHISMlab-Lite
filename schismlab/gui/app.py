@@ -1740,11 +1740,12 @@ def page_model():
                 vt = ui.select({"2d": t["v2d"], "sigma": t["vsigma"], "sz": t["vsz"]}, value=safe_select(("2d", "sigma", "sz"), v.get("type", "2d"), "2d", label=t["vertical"]), label=t["vertical"]).classes("sl-w-md")
                 nvrt = ui.number(t["nvrt"], value=int(v.get("nvrt", v.get("nsigma", 20))), min=3, step=1).classes("sl-w-sm")
                 hc = ui.number("h_c (m)", value=float(v.get("h_c", 10))).classes("sl-w-sm"); tf = ui.number("theta_f", value=float(v.get("theta_f", 4)), min=0.001).classes("sl-w-sm")
+                tb = ui.number("theta_b", value=float(v.get("theta_b", 0.5 if v.get("type") == "sz" else 0.0)), min=0, max=1, step=0.1).classes("sl-w-sm")
                 zl = ui.input(t["zlevels"], value=",".join(str(z) for z in v.get("zlevels", [-2500, -1500, -1000, -700, -500, -300]))).classes("sl-w-lg")
                 vbtn = ui.button(t["show_vgrid"], icon="stacked_line_chart").props("flat dense")
             vdesc = ui.markdown().classes("text-caption text-grey-8")
             def vis():
-                nvrt.set_visibility(vt.value != "2d"); hc.set_visibility(vt.value != "2d"); tf.set_visibility(vt.value != "2d"); zl.set_visibility(vt.value == "sz"); vbtn.set_visibility(vt.value != "2d")
+                nvrt.set_visibility(vt.value != "2d"); hc.set_visibility(vt.value != "2d"); tf.set_visibility(vt.value != "2d"); tb.set_visibility(vt.value != "2d"); zl.set_visibility(vt.value == "sz"); vbtn.set_visibility(vt.value != "2d")
                 vdesc.set_content(t["vdesc_" + vt.value])
                 set_caption(exp_vert, t["v2d"] if vt.value == "2d" else f"3D {vt.value} · {int(nvrt.value or 0)} {t['levels_s']}")
             vt.on_value_change(lambda e: vis()); nvrt.on_value_change(lambda e: vis()); vis()
@@ -1753,9 +1754,9 @@ def page_model():
                 from .figures import vgrid_figure
                 try:
                     if vt.value == "sz":
-                        vg = VGrid.sz(int(nvrt.value), [float(s_) for s_ in zl.value.split(",")], float(hc.value), 0.0, float(tf.value))
+                        vg = VGrid.sz(int(nvrt.value), [float(s_) for s_ in zl.value.split(",")], float(hc.value), float(tb.value or 0), float(tf.value))
                     else:
-                        vg = VGrid.sigma(int(nvrt.value), float(hc.value), 0.0, float(tf.value))
+                        vg = VGrid.sigma(int(nvrt.value), float(hc.value), float(tb.value or 0), float(tf.value))
                 except (ValueError, IndexError) as ex:
                     ui.notify(str(ex), type="negative"); return
                 hmax = 1000.0
@@ -1802,17 +1803,19 @@ def page_model():
             ui.label(t["ic_hint"]).classes("text-caption text-grey-7")
             _icsrc = ic.get("source") or {}
             src = _icsrc.get("name", "analytic") if isinstance(_icsrc, dict) else str(_icsrc)       # setup admite `source: medsea`
-            _sopts = {"analytic": t["ic_analytic"], "medsea_reanalysis": t["ic_cmems"], "medsea": t["ic_cmems_an"], "global": t["ic_cmems_glo"]}
-            src = safe_select(_sopts, src, "analytic", keep_unknown=True)                    # cmems, medsea_analysis…: se conservan
+            _sopts = {"analytic": t["ic_analytic"], "medsea_reanalysis": t["ic_cmems"], "medsea": t["ic_cmems_an"], "global": t["ic_cmems_glo"]} \
+                if is_pro() else {"analytic": t["ic_analytic"]}                                # Copernicus: SCHISMlab Pro
+            src = safe_select(_sopts, src, "analytic", keep_unknown=is_pro())                # cmems, medsea_analysis…: se conservan
             ic_src = ui.select(_sopts, value=src, label=t["ic_source"]).classes("sl-w-xl")
+            ic_src.set_visibility(is_pro())
             ic_src.on_value_change(lambda e: set_caption(exp_ic, _sopts.get(e.value, e.value))); set_caption(exp_ic, _sopts.get(src, src))
             from .ic_builder import ic_builder
             def live_vgrid():
                 from ..forcing import VGrid
                 if vt.value == "sz":
-                    return VGrid.sz(int(nvrt.value), [float(s_) for s_ in zl.value.split(",")], float(hc.value), 0.0, float(tf.value))
+                    return VGrid.sz(int(nvrt.value), [float(s_) for s_ in zl.value.split(",")], float(hc.value), float(tb.value or 0), float(tf.value))
                 if vt.value == "sigma":
-                    return VGrid.sigma(int(nvrt.value), float(hc.value), 0.0, float(tf.value))
+                    return VGrid.sigma(int(nvrt.value), float(hc.value), float(tb.value or 0), float(tf.value))
                 return VGrid.two_d()
             with ui.column().classes("w-full") as ic_box:
                 ic_collect, ic_refresh = ic_builder(c, workdir(), t, S().get("lang", "es"), live_vgrid, lambda: bool(baro.value), lambda: vt.value != "2d", dark=bool(S().get("dark")))
@@ -1822,13 +1825,15 @@ def page_model():
         with ui.expansion(t["scenario"], icon="trending_up", value=False).classes("sl-exp w-full") as exp_sc:
             with ui.row().classes("row wrap q-col-gutter-sm items-center"):
                 slr = ui.number(t["slr"], value=float(sc.get("sea_level_rise", 0.0) or 0.0), step=0.1).classes("sl-w-md")
-                _mopts = {"const": t["manning_const"], "worldcover": t["manning_wc"], "corine": t["manning_corine"]}
-                msrc = ui.select(_mopts, value=safe_select(_mopts, fr.get("landcover") or "const", "const", keep_unknown=True), label=t["manning_src"]).classes("sl-w-lg")
+                slr.set_visibility(is_pro())                       # subida del nivel del mar y usos del suelo: SCHISMlab Pro
+                _mopts = {"const": t["manning_const"], "worldcover": t["manning_wc"], "corine": t["manning_corine"]} if is_pro() else {"const": t["manning_const"]}
+                msrc = ui.select(_mopts, value=safe_select(_mopts, fr.get("landcover") or "const", "const", keep_unknown=is_pro()), label=t["manning_src"]).classes("sl-w-lg")
                 man = ui.number(t["manning_sea"] if fr.get("landcover") else "Manning n", value=float(fr.get("manning", 0.025)), step=0.005, format="%.4f").classes("sl-w-sm")
                 mfile = ui.input(t["manning_file"], value=fr.get("file", "")).props("dense clearable").classes("sl-w-lg")
                 msrc.on_value_change(lambda e: mfile.set_visibility(e.value == "corine")); mfile.set_visibility(msrc.value == "corine")
             def sc_caption():
-                set_caption(exp_sc, f"{t['slr_s']} {fmt_num(slr.value or 0, lang_, 2)} m · Manning {_mopts.get(msrc.value, msrc.value)} {fmt_num(man.value or 0, lang_, 3)}")
+                set_caption(exp_sc, (f"{t['slr_s']} {fmt_num(slr.value or 0, lang_, 2)} m · Manning {_mopts.get(msrc.value, msrc.value)} " if is_pro() else "Manning n = ")
+                            + fmt_num(man.value or 0, lang_, 3))
             for w_ in (slr, msrc, man):
                 w_.on_value_change(lambda e: sc_caption())
             sc_caption()
@@ -1845,9 +1850,9 @@ def page_model():
             c2["time"] = {"start": start.value, "days": float(days.value), "dt": float(dt.value), "ramp_days": float(ramp.value)}
             vv = {"type": vt.value}
             if vt.value == "sigma":
-                vv.update(nvrt=int(nvrt.value), h_c=float(hc.value), theta_b=0, theta_f=float(tf.value))
+                vv.update(nvrt=int(nvrt.value), h_c=float(hc.value), theta_b=float(tb.value or 0), theta_f=float(tf.value))
             elif vt.value == "sz":
-                vv.update(nsigma=int(nvrt.value), zlevels=[float(z) for z in zl.value.split(",")], h_c=float(hc.value), theta_b=0.5, theta_f=float(tf.value))
+                vv.update(nsigma=int(nvrt.value), zlevels=[float(z) for z in zl.value.split(",")], h_c=float(hc.value), theta_b=float(tb.value or 0), theta_f=float(tf.value))
             c2["vertical"] = vv
             c2["physics"] = {**c2.get("physics", {}), "baroclinic": bool(baro.value), "turbulence": int(turb.value), "coriolis": cor.value}
             c2["reference"] = {"lon0": float(lon0.value), "lat0": float(lat0.value)}
@@ -1902,11 +1907,18 @@ def page_forcing():
                     u = ui.input(t["u"], value=str((w or {}).get("u", 10))); v = ui.input(t["v"], value=str((w or {}).get("v", 0)))
                     tau_x = ui.input(t["tau_x"], value=str(_st.get("x", 0.1))); tau_y = ui.input(t["tau_y"], value=str(_st.get("y", 0)))
                     wformula = ui.select({1: t["wf_hwang"], -1: t["wf_pp"]}, value=safe_select([1, -1], int((w or {}).get("formula", 1)), 1, label=t["wformula"]), label=t["wformula"]).classes("sl-w-md")
+                    _ramp_def = lambda k: 0.0 if k == "stress" else 0.5          # esfuerzo: sin rampa, para comparar con la teoría desde el inicio
+                    wramp = ui.number(t["wind_ramp"], value=float((w or {}).get("ramp_days", _ramp_def(cur))), min=0, step=0.25).classes("sl-w-sm")
+                    wdt = ui.number(t["wind_dt"], value=float((w or {}).get("dt_hours", 1.0)), min=0.1, step=1).classes("sl-w-sm")
                     heat = ui.switch(t["heat"], value=bool((atm or {}).get("heat", False))); precip = ui.switch(t["precip"], value=bool((atm or {}).get("precipitation", False)))
                 def visw():
                     u.set_visibility(wk.value in ("uniform", "expr")); v.set_visibility(wk.value in ("uniform", "expr"))
                     tau_x.set_visibility(wk.value == "stress"); tau_y.set_visibility(wk.value == "stress"); wformula.set_visibility(wk.value in ("uniform", "expr", "stress"))
+                    wramp.set_visibility(wk.value in ("uniform", "expr", "stress")); wdt.set_visibility(wk.value in ("uniform", "expr", "stress"))
                     heat.set_visibility(wk.value == "era5"); precip.set_visibility(wk.value == "era5")
+                def _wk_ramp(e):                                # otro tipo de viento: su rampa por defecto (la del YAML si es el tipo guardado)
+                    wramp.set_value(float((w or {}).get("ramp_days", _ramp_def(cur))) if e.value == cur and w else _ramp_def(e.value))
+                wk.on_value_change(_wk_ramp)
                 wk.on_value_change(lambda e: visw()); visw()
         with exp["tides"]:
             with ui.column().classes("w-full"):
@@ -1941,6 +1953,17 @@ def page_forcing():
                     _ALL_CONS = ["M2", "S2", "N2", "K2", "K1", "O1", "P1", "Q1"]
                     cons = ui.select(_ALL_CONS, multiple=True, value=safe_select(_ALL_CONS, td.get("constituents", _ALL_CONS), _ALL_CONS, multiple=True), label=t["cons"]).classes("sl-w-lg")
                     pot = ui.switch(t["potential"], value=bool(bc.get("tidal_potential", True)))
+                _bv = bc.get("velocity", "none")
+                _bvopts = {"none": t["bc_vel_none"], "flux": t["bc_vel_flux"]}
+                if isinstance(_bv, bool) or not isinstance(_bv, (int, float, str)) or (isinstance(_bv, str) and _bv != "none"):
+                    _bvopts["keep"] = t["bc_vel_keep"].format(value=_bv); _bv_mode = "keep"      # marea en velocidad, flather...: se conserva
+                else:
+                    _bv_mode = "none" if _bv == "none" else "flux"
+                with ui.row().classes("row wrap q-col-gutter-sm items-center"):
+                    bvel = ui.select(_bvopts, value=_bv_mode, label=t["bc_vel"]).classes("sl-w-lg")
+                    bflux = ui.number(t["bc_flux"], value=float(_bv) if _bv_mode == "flux" else -1.0e6, step=100000, format="%.0f").classes("sl-w-md")
+                bflux.bind_visibility_from(bvel, "value", backward=lambda v_: v_ == "flux")
+                ui.label(t["bc_vel_hint"]).classes("text-caption text-grey-7")
                 def visb():
                     const.set_visibility(ek.value == "const"); [x.set_visibility(ek.value == "tides") for x in (tsrc, cons, pot)]
                     amp.set_visibility(ek.value == "tides" and tsrc.value == "idealized")
@@ -2046,9 +2069,11 @@ def page_forcing():
                 try: return float(s)
                 except ValueError: return s
             if wk.value in ("uniform", "expr"):
-                f2["wind"] = {"u": num(u.value), "v": num(v.value), "ramp_days": (fc.get("wind") or {}).get("ramp_days", 0.5), "formula": int(wformula.value)}
+                f2["wind"] = {"u": num(u.value), "v": num(v.value), "ramp_days": float(wramp.value or 0), "formula": int(wformula.value)}
             elif wk.value == "stress":   # esfuerzo en Pa: sin rampa por defecto, para comparar con la teoría desde el inicio
-                f2["wind"] = {"stress": {"x": num(tau_x.value), "y": num(tau_y.value)}, "ramp_days": (fc.get("wind") or {}).get("ramp_days", 0.0), "formula": int(wformula.value)}
+                f2["wind"] = {"stress": {"x": num(tau_x.value), "y": num(tau_y.value)}, "ramp_days": float(wramp.value or 0), "formula": int(wformula.value)}
+            if "wind" in f2 and float(wdt.value or 1.0) != 1.0:
+                f2["wind"]["dt_hours"] = float(wdt.value)
             elif wk.value == "era5":
                 f2["atmosphere"] = {"source": "era5", "heat": bool(heat.value), "precipitation": bool(precip.value)}
             if PRO and rivers:
@@ -2079,6 +2104,10 @@ def page_forcing():
                 b2["sponge"] = {"width_km": float(sp_w.value or 40), "relax_uv": round(relax, 6), "relax_elev": round(relax, 6) if sp_eta.value else 0.0}
             elif sp_mode.value == "off": b2["sponge"] = None
             else: b2.pop("sponge", None)
+            if bvel.value == "none":
+                b2.pop("velocity", None)
+            elif bvel.value == "flux":
+                b2["velocity"] = float(bflux.value or 0)        # caudal constante en m3/s (negativo: entra)
             c2["boundaries"] = b2
             if not PRO:
                 pass                                         # Lite: sin oleaje (la sección waves se conserva tal cual)
@@ -2867,43 +2896,9 @@ def get_ds(wd: Path):
 
 
 def vgrid_of(c: dict, wd: Path, ds=None):
-    """Malla vertical de la simulación de la carpeta `wd`: su caso.yaml y su vgrid.in (los archivados llevan copia) y, si no
-    cuadran o no existen (p. ej. vgrid LSC2 de una malla importada), una sigma con el número de niveles del dataset."""
-    from ..forcing import VGrid
-    nl = int(ds.sizes.get("layer", 1)) if ds is not None else None
-    c_run = c
-    if (wd / "caso.yaml").exists():
-        try:
-            c_run = load_cfg(wd / "caso.yaml") or c
-        except Exception:   # noqa: BLE001
-            c_run = c
-    v = c_run.get("vertical") or {"type": "2d"}
-    vg = None
-    try:
-        if v.get("type") == "sigma":
-            vg = VGrid.sigma(int(v.get("nvrt", 20)), float(v.get("h_c", 10)), float(v.get("theta_b", 0)), float(v.get("theta_f", 4)))
-        elif v.get("type") == "sz":
-            vf = wd / "vgrid.in"
-            if vf.exists():
-                txt = vf.read_text().splitlines()
-                if int(txt[0].split()[0]) != 2:                          # ivcor = 1 (LSC2): no se parsea
-                    raise ValueError("vgrid LSC2")
-                nvrt, kz, hs = txt[1].split()[:3]; z = [float(txt[3 + k].split()[1]) for k in range(int(kz) - 1)] + [-float(hs)]
-                hc, tb, tf = [float(x) for x in txt[4 + int(kz)].split()[:3]]
-                vg = VGrid.sz(int(nvrt) - int(kz) + 1, z, hc, tb, tf)
-            else:
-                vg = VGrid.sz(int(v.get("nsigma", 20)), [float(z_) for z_ in v.get("zlevels", [-1000])], float(v.get("h_c", 10)), float(v.get("theta_b", 0.5)), float(v.get("theta_f", 4)))
-        else:
-            vg = VGrid.two_d()
-    except Exception:   # noqa: BLE001  (vgrid ilegible: se deduce del dataset)
-        vg = None
-    if vg is not None and (nl is None or vg.nvrt == nl):
-        return vg
-    if nl is not None and nl > 2:
-        return VGrid.sigma(nl, float(v.get("h_c", 10) or 10), 0.0, float(v.get("theta_f", 4) or 4))
-    if nl is not None and nl <= 2:                                  # el dataset es 2D aunque el caso diga otra cosa
-        return VGrid.two_d()
-    return VGrid.two_d() if vg is None else vg
+    """Malla vertical de la simulación de la carpeta `wd` (ver schismlab.analysis.output.run_vgrid)."""
+    from ..analysis.output import run_vgrid
+    return run_vgrid(wd, ds, cfg=c)
 
 
 def _results_content(tab_key: str):

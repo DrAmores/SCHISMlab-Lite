@@ -117,6 +117,9 @@ class Section:
         if "zCoordinates" in ds:
             return self.interp(ds.zCoordinates.isel(time=it).values)
         if self.vg is None:
+            from .output import auto_vgrid
+            self.vg = auto_vgrid(ds)                          # la de la simulación (caso.yaml / vgrid.in)
+        if self.vg is None:
             raise ValueError("hace falta la malla vertical (vg) o la salida zCoordinates")
         eta = self.interp(ds.elevation.isel(time=it).values) if "elevation" in ds else np.zeros_like(self.depth)
         return self.vg.zcor(np.nan_to_num(self.depth, nan=1.0), np.nan_to_num(eta))
@@ -204,6 +207,11 @@ def field_at_depth(ds: xr.Dataset, var: str, it: int, depth_m: float, vg=None) -
     if "zCoordinates" in ds:
         z = ds.zCoordinates.isel(time=it).values.astype(float); z = np.where(z < FILL, np.nan, z)
     else:
+        if vg is None:
+            from .output import auto_vgrid
+            vg = auto_vgrid(ds)
+        if vg is None:
+            raise ValueError("hace falta la malla vertical (vg) o la salida zCoordinates")
         eta = ds.elevation.isel(time=it).values if "elevation" in ds else np.zeros(ds.sizes["node"])
         z = vg.zcor(ds.depth.values, eta)
     return interp_at_depth(v, z, depth_m)

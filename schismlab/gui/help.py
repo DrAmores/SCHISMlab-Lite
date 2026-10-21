@@ -12,6 +12,10 @@ from .i18n import TEXT
 HELP = {
  "es": {
   # --- caso y malla
+  "wind_ramp": "Días en los que el viento (o el esfuerzo) crece de 0 a su valor, para arrancar sin un golpe brusco. Por defecto medio día con viento y 0 con esfuerzo.",
+  "wind_dt": "Cada cuántas horas se escribe la serie de viento que lee SCHISM (wind.th o sflux). Con viento constante en el tiempo da igual; con viento variable, más pequeño sigue mejor la fórmula.",
+  "bc_vel": "Qué se impone en los contornos abiertos forzados además del nivel: nada, o un caudal constante repartido a lo largo del contorno (tipo 2 de SCHISM).",
+  "bc_flux": "Caudal total por el contorno, en m³/s. Negativo: el agua entra al dominio; positivo: sale. Se aplica a cada lado forzado; los de radiación (Flather) lo ignoran. Sube con la rampa de Física.",
   "pro_token": "Token de acceso a SCHISMlab Pro que te ha dado el profesor (empieza por github_pat_). Da acceso de solo lectura a la extensión privada; se guarda en ~/.schismlab/credentials/pro_token, solo en este ordenador. No lo compartas.",
   "name": "Nombre identificativo (caso, zona, río o estación). En los casos se usa para la carpeta y los ficheros: sin espacios ni acentos.",
   "sim_folder": "Carpeta donde se guardan los ficheros de la simulación (malla, forzamientos, param.nml, salidas y copia del YAML), en una subcarpeta con el nombre del caso. El YAML del caso queda en Mis casos. Ruta absoluta; se crea si no existe.",
@@ -85,6 +89,7 @@ HELP = {
   "vertical": "Tipo de malla vertical: 2D (una capa, promediado), sigma (niveles que siguen el fondo) o sigma-z (sigma arriba y niveles z fijos en el océano profundo).",
   "nvrt": "Número de niveles verticales. Más niveles = mejor resolución de la estratificación y más coste. Típico: 20–40.",
   "h_c (m)": "Profundidad (m) por encima de la cual los niveles sigma son uniformes; por debajo se estiran. Típico: 5–20 m.",
+  "theta_b": "Reparto del estiramiento entre superficie y fondo (0–1): 0 concentra los niveles solo en la superficie; 1 también en el fondo. Con theta_f pequeño apenas importa.",
   "theta_f": "Concentración de niveles cerca de la superficie y el fondo (estiramiento sigma). 0 = uniformes; 3–6 concentra niveles en las capas límite.",
   "show_vgrid": "Dibuja los niveles verticales con los valores actuales: útil para ver cuántos niveles quedan en la superficie, en el fondo y en aguas someras.",
   "zlevels": "Profundidades (m, negativas) de los niveles z por debajo de la zona sigma, separadas por comas, de abajo arriba.",
@@ -248,6 +253,10 @@ HELP = {
   "m": "Nivel constante (m) impuesto en los contornos abiertos.",
  },
  "en": {
+  "wind_ramp": "Days over which the wind (or stress) grows from 0 to its value, to avoid an abrupt start. Default half a day for wind and 0 for stress.",
+  "wind_dt": "How many hours apart the wind series read by SCHISM (wind.th or sflux) is written. Irrelevant for wind constant in time; smaller follows a time-varying formula better.",
+  "bc_vel": "What is imposed on the forced open boundaries besides the level: nothing, or a constant discharge spread along the boundary (SCHISM type 2).",
+  "bc_flux": "Total discharge through the boundary, in m³/s. Negative: water enters the domain; positive: it leaves. Applied to each forced side; radiation (Flather) sides ignore it. It ramps up with the Physics ramp.",
   "pro_token": "SCHISMlab Pro access token given by your teacher (it starts with github_pat_). It grants read-only access to the private extension; it is stored in ~/.schismlab/credentials/pro_token, on this computer only. Do not share it.",
   "name": "Identifying name (case, zone, river or station). For cases it names the folder and files: no spaces or accents.",
   "sim_folder": "Folder for the simulation files (mesh, forcings, param.nml, outputs and a copy of the YAML), in a subfolder named after the case. The case YAML stays in My cases. Absolute path; created if missing.",
@@ -320,6 +329,7 @@ HELP = {
   "vertical": "Vertical grid type: 2D (one layer, depth-averaged), sigma (terrain-following levels) or sigma-z (sigma above fixed z levels in the deep ocean).",
   "nvrt": "Number of vertical levels. More = better stratification and higher cost. Typical: 20–40.",
   "h_c (m)": "Depth (m) above which sigma levels are uniform; below it they stretch. Typical: 5–20 m.",
+  "theta_b": "How stretching is shared between surface and bottom (0–1): 0 concentrates levels at the surface only; 1 also at the bottom. Hardly matters with a small theta_f.",
   "theta_f": "Level concentration near surface and bottom (sigma stretching). 0 = uniform; 3–6 concentrates levels in the boundary layers.",
   "show_vgrid": "Draws the vertical levels with the current values: useful to see how many levels sit at the surface, the bottom and in shallow water.",
   "zlevels": "Depths (m, negative) of the z levels below the sigma zone, comma-separated, bottom to top.",

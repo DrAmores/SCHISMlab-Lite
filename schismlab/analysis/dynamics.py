@@ -135,7 +135,10 @@ def coriolis(ds: xr.Dataset) -> xr.DataArray:
 
 def transport(ds: xr.Dataset, time=None, vg=None) -> tuple[xr.DataArray, xr.DataArray]:
     """Transporte integrado en la vertical (U, V) en m²/s: integral de horizontalVel en z (zCoordinates o malla vertical
-    vg) o, si solo hay depthAverageVel, velocidad media por (h + eta)."""
+    vg; sin ellas, la de la simulación) o, si solo hay depthAverageVel, velocidad media por (h + eta)."""
+    if vg is None and "horizontalVelX" in ds and "zCoordinates" not in ds:
+        from .output import auto_vgrid
+        vg = auto_vgrid(ds)
     if "horizontalVelX" in ds and ("zCoordinates" in ds or vg is not None):
         u, v = ds.horizontalVelX, ds.horizontalVelY
         if time is not None:

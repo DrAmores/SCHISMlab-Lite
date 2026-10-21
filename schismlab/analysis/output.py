@@ -136,3 +136,57 @@ def crop_outputs(rundir: str | Path, lon: tuple[float, float], lat: tuple[float,
         if (rundir / extra).exists() and not (dst / extra).exists():
             (dst / extra).write_bytes((rundir / extra).read_bytes())
     return dst
+
+
+def run_vgrid(wd, ds=None, cfg: dict | None = None):
+    """Malla vertical de la simulación de la carpeta `wd`: su caso.yaml y su vgrid.in (los archivados llevan copia) y, si no
+    cuadran o no existen (p. ej. vgrid LSC2 de una malla importada), una sigma con el número de niveles del dataset."""
+    import yaml
+    from ..forcing import VGrid
+    wd = Path(wd)
+    nl = int(ds.sizes.get("layer", 1)) if ds is not None else None
+    c = cfg or {}
+    c_run = c
+    if (wd / "caso.yaml").exists():
+        try:
+            c_run = yaml.safe_load((wd / "caso.yaml").read_text(encoding="utf-8")) or c
+        except Exception:   # noqa: BLE001
+            c_run = c
+    v = c_run.get("vertical") or {"type": "2d"}
+    vg = None
+    try:
+        if v.get("type") == "sigma":
+            vg = VGrid.sigma(int(v.get("nvrt", 20)), float(v.get("h_c", 10)), float(v.get("theta_b", 0)), float(v.get("theta_f", 4)))
+        elif v.get("type") == "sz":
+            vf = wd / "vgrid.in"
+            if vf.exists():
+                txt = vf.read_text().splitlines()
+                if int(txt[0].split()[0]) != 2:                          # ivcor = 1 (LSC2): no se parsea
+                    raise ValueError("vgrid LSC2")
+                nvrt, kz, hs = txt[1].split()[:3]; z = [float(txt[3 + k].split()[1]) for k in range(int(kz) - 1)] + [-float(hs)]
+                hc, tb, tf = [float(x) for x in txt[4 + int(kz)].split()[:3]]
+                vg = VGrid.sz(int(nvrt) - int(kz) + 1, z, hc, tb, tf)
+            else:
+                vg = VGrid.sz(int(v.get("nsigma", 20)), [float(z_) for z_ in v.get("zlevels", [-1000])], float(v.get("h_c", 10)), float(v.get("theta_b", 0.5)), float(v.get("theta_f", 4)))
+        else:
+            vg = VGrid.two_d()
+    except Exception:   # noqa: BLE001  (vgrid ilegible: se deduce del dataset)
+        vg = None
+    if vg is not None and (nl is None or vg.nvrt == nl):
+        return vg
+    if nl is not None and nl > 2:
+        return VGrid.sigma(nl, float(v.get("h_c", 10) or 10), 0.0, float(v.get("theta_f", 4) or 4))
+    if nl is not None and nl <= 2:                                  # el dataset es 2D aunque el caso diga otra cosa
+        return VGrid.two_d()
+    return VGrid.two_d() if vg is None else vg
+
+
+def auto_vgrid(ds: xr.Dataset):
+    """Malla vertical de la simulación de la que viene `ds` (abierto con open_run), para los cálculos en 3D sin la salida
+    zCoordinates; None si no se puede saber."""
+    if "_vgrid" not in ds.attrs:
+        try:
+            ds.attrs["_vgrid"] = run_vgrid(ds.attrs["rundir"], ds) if ds.attrs.get("rundir") else None
+        except Exception:   # noqa: BLE001
+            ds.attrs["_vgrid"] = None
+    return ds.attrs["_vgrid"]

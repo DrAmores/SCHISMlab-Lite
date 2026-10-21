@@ -678,14 +678,28 @@ def spectrum_tab(ds, c: dict, wd: Path, t: dict, lang: str, st: ExplorerState):
         if p is None:
             return None
         return point_series(ds, pvar.value, p["node"], st.layer)
+    def _cart_lat(y_m):
+        """Dominio cartesiano: latitud equivalente para el periodo inercial (plano f: lat0; plano β: lat0 + y/R)."""
+        cor = (c.get("physics") or {}).get("coriolis", "f-plane")
+        if cor in ("none", False, 0, None):
+            return None
+        lat0 = float((c.get("reference") or {}).get("lat0", 45.0))
+        if cor == "beta" and y_m is not None:
+            return lat0 + float(np.rad2deg(float(y_m) / 6371e3))
+        return lat0
     def lat_of(name):
         if src.value == "stations":
             for s_ in (c.get("stations") or []):
                 if str(s_.get("name")) == name and "lat" in s_:
                     return float(s_["lat"])
-            return float(ds.y.mean()) if st.geo else None
+            if st.geo:
+                return float(ds.y.mean())
+            s_ = next((s_ for s_ in (c.get("stations") or []) if str(s_.get("name")) == name), None)
+            return _cart_lat(s_.get("y") if s_ else None)
         p = next((p for p in st.points if p["name"] == name), None)
-        return (p["y"] if st.geo else None) if p else None
+        if not p:
+            return None
+        return p["y"] if st.geo else _cart_lat(p["y"])
     def refresh():
         names = list(psel.value or [])
         sf, pf, rf = go.Figure(), None, None; wf_ = None; msg = []

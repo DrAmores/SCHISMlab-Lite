@@ -42,6 +42,9 @@ def _column_z(ds: xr.Dataset, it: int, vg=None) -> np.ndarray:
     if "zCoordinates" in ds:
         z = ds.zCoordinates.isel(time=it).values.astype(float); return np.where(z < FILL, np.nan, z)
     if vg is None:
+        from .output import auto_vgrid
+        vg = auto_vgrid(ds)                                   # la de la simulación (caso.yaml / vgrid.in)
+    if vg is None:
         raise ValueError("hace falta la malla vertical (vg) o la salida zCoordinates")
     eta = ds.elevation.isel(time=it).values if "elevation" in ds else np.zeros(ds.sizes["node"])
     return vg.zcor(np.nan_to_num(ds.depth.values, nan=1.0), np.nan_to_num(eta))
@@ -75,6 +78,9 @@ def isosurface_series(ds: xr.Dataset, var: str, value: float, node: int, vg=None
     if "zCoordinates" in ds:
         z = ds.zCoordinates.isel(node=node).values.astype(float); z = np.where(z < FILL, np.nan, z)
     else:
+        if vg is None:
+            from .output import auto_vgrid
+            vg = auto_vgrid(ds)
         if vg is None:
             raise ValueError("hace falta la malla vertical (vg) o la salida zCoordinates")
         h = float(np.nan_to_num(ds.depth.values[node], nan=1.0))

@@ -236,6 +236,10 @@ TEXT = {
   "pro_token": "Token de acceso a Pro", "pro_activate_btn": "Activar SCHISMlab Pro", "pro_active": "SCHISMlab Pro está activo en este ordenador.",
   "pro_installed_restart": "SCHISMlab Pro instalado. Reinicia la interfaz para usarlo.", "pro_problem": "La extensión Pro está instalada pero no se ha cargado: {msg}",
   "pro_activating": "Comprobando el token y descargando SCHISMlab Pro…", "pro_bad_token": "No se ha podido activar: {msg}", "edition_s": "Edición",
+  "wind_ramp": "Rampa del viento (días)", "wind_dt": "Paso de la serie de viento (h)",
+  "bc_vel": "Velocidad en los contornos forzados", "bc_vel_none": "ninguna (solo el nivel)", "bc_vel_flux": "caudal constante",
+  "bc_vel_keep": "la del caso: {value}", "bc_flux": "Caudal (m³/s; negativo = entra)",
+  "bc_vel_hint": "Caudal total que entra (negativo) o sale (positivo) por cada contorno forzado; los lados de radiación no lo usan.",
   "days_s": "días", "slr_s": "SLR",
  },
  "en": {
@@ -474,6 +478,10 @@ TEXT = {
   "pro_token": "Pro access token", "pro_activate_btn": "Activate SCHISMlab Pro", "pro_active": "SCHISMlab Pro is active on this computer.",
   "pro_installed_restart": "SCHISMlab Pro installed. Restart the interface to use it.", "pro_problem": "The Pro extension is installed but was not loaded: {msg}",
   "pro_activating": "Checking the token and downloading SCHISMlab Pro…", "pro_bad_token": "Could not activate: {msg}", "edition_s": "Edition",
+  "wind_ramp": "Wind ramp (days)", "wind_dt": "Wind series step (h)",
+  "bc_vel": "Velocity at forced boundaries", "bc_vel_none": "none (level only)", "bc_vel_flux": "constant discharge",
+  "bc_vel_keep": "the case's: {value}", "bc_flux": "Discharge (m³/s; negative = inflow)",
+  "bc_vel_hint": "Total discharge entering (negative) or leaving (positive) through each forced boundary; radiation sides ignore it.",
   "days_s": "days", "slr_s": "SLR",
  },
 }
