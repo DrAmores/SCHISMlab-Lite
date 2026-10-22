@@ -220,3 +220,26 @@ def test_explorer_iso_mode():
     assert np.allclose(fig.data[-1].y, -40.0)                          # línea de la isoterma en la sección
     assert iso_hovmoller_figure(s["sec"], "temperature", 15.0, "h").data[0].z.shape[0] == nt
     st.depth_mode = "layer"; assert not st.iso_ok()
+
+
+def test_explorer_series_velocity_components():
+    """Práctica 1 (oscilaciones inerciales): las series muestran u y v por separado (no solo el módulo) para ver el giro."""
+    pytest.importorskip("nicegui")
+    from schismlab.gui.explorer import ExplorerState, series_figure_multi, series_cursor
+    m = rectangular_basin(40e3, 20e3, 4e3, depth=100.0)
+    nt = 9; tt = np.arange(nt) * np.timedelta64(1, "h"); ph = 2 * np.pi * np.arange(nt) / 8
+    U = np.broadcast_to(np.cos(ph)[:, None], (nt, m.nnodes)).copy(); V = np.broadcast_to(-np.sin(ph)[:, None], (nt, m.nnodes)).copy()
+    ds = xr.Dataset({"depthAverageVelX": (("time", "node"), U), "depthAverageVelY": (("time", "node"), V),
+                     "elevation": (("time", "node"), np.zeros((nt, m.nnodes))), "depth": ("node", m.depth)},
+                    coords={"time": np.datetime64("2020-01-01") + tt, "x": ("node", m.x), "y": ("node", m.y)})
+    ds.attrs["elements"] = np.asarray(m.elements)[:, :3]
+    st = ExplorerState(ds, None); st.var = "depthAverageVel"; st.add_point(20e3, 10e3); st.it = 2
+    f = series_figure_multi(st, "depthAverageVel", "es")
+    lines = [d for d in f.data if d.mode == "lines"]
+    assert [d.name.split()[-1] for d in lines] == ["u", "v"]
+    assert lines[0].y[0] == pytest.approx(1.0) and lines[1].y[2] == pytest.approx(-1.0)     # gira a la derecha: v < 0
+    assert f.layout.shapes[0].x0.startswith("2020-01-01T02:00")                               # la forma 0 es la línea del instante
+    st.component = "mag"
+    g = series_figure_multi(st, "depthAverageVel", "es")
+    assert [d.name.split()[-1] for d in g.data if d.mode == "lines"] == ["|u|"] and np.allclose(g.data[0].y, 1.0)
+    assert series_cursor(st)[1] == [pytest.approx(1.0)]

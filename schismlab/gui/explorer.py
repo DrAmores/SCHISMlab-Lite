@@ -216,8 +216,9 @@ def station_series(wd: Path, var: str, name: str):
         ds_ = [read_stations(wd, k) for k in keys]
         if any(name not in d.columns for d in ds_):
             return None
-        y = np.hypot(ds_[0][name].values, ds_[1][name].values) if len(ds_) == 2 else ds_[0][name].values
-        return ds_[0].index.values, y
+        if len(ds_) == 2:                                # vector: componentes (u hacia el este, v hacia el norte)
+            return ds_[0].index.values, {"u": ds_[0][name].values.astype(float), "v": ds_[1][name].values.astype(float)}
+        return ds_[0].index.values, ds_[0][name].values
     except (FileNotFoundError, OSError, ValueError):
         return None
 
@@ -234,28 +235,48 @@ def series_figure_multi(st: ExplorerState, var: str, lang: str, wd: Path | None 
             lines.append((np.asarray(st.ds.time.values), np.asarray(y, float), p["color"]))
         fig.update_layout(yaxis=dict(title=st.iso_label(lang), autorange="reversed"), hovermode="x unified", **layout(st.dark))
     else:
+        comp = getattr(st, "component", "uv")
+        dash = {"u": "solid", "v": "dash", "mag": "dot"}
+        vector = False
         for p in st.points:
             sta = station_series(wd, var, p["name"]) if p.get("station") else None
             if sta is not None:
-                t_, y = sta; used_sta = True
-                fig.add_trace(go.Scatter(x=t_, y=y, mode="lines", name=f"{p['name']} (staout)", line=dict(color=p["color"], width=1.5)))
+                t_, y = sta; used_sta = True; suffix = " (staout)"
+                comps = y if isinstance(y, dict) else None
+            else:
+                s = point_series(st.ds, var, p["node"], st.layer); t_ = s["t"]; suffix = ""
+                comps = {"u": s["u"], "v": s["v"]} if "u" in s else None
+                y = s.get("y")
+            if comps is None:
+                fig.add_trace(go.Scatter(x=t_, y=y, mode="lines", name=p["name"] + suffix, line=dict(color=p["color"], width=2)))
                 lines.append((np.asarray(t_), np.asarray(y, float), p["color"]))
                 continue
-            s = point_series(st.ds, var, p["node"], st.layer)
-            y = np.hypot(s["u"], s["v"]) if "u" in s else s["y"]
-            fig.add_trace(go.Scatter(x=s["t"], y=y, mode="lines", name=p["name"], line=dict(color=p["color"], width=2)))
-            lines.append((np.asarray(s["t"]), np.asarray(y, float), p["color"]))
-        fig.update_layout(yaxis_title=label(var, lang), hovermode="x unified", **layout(st.dark))
+            vector = True
+            comps = {**comps, "mag": np.hypot(comps["u"], comps["v"])}
+            for k in ({"uv": ("u", "v"), "u": ("u",), "v": ("v",), "mag": ("mag",)}[comp if comp in ("uv", "u", "v", "mag") else "uv"]):
+                nm = {"u": "u", "v": "v", "mag": "|u|"}[k]
+                fig.add_trace(go.Scatter(x=t_, y=comps[k], mode="lines", name=f"{p['name']} {nm}{suffix}",
+                                         line=dict(color=p["color"], width=2, dash=dash[k])))
+                lines.append((np.asarray(t_), np.asarray(comps[k], float), p["color"]))
+        ytitle = label(var, lang)
+        if vector and comp != "mag":
+            ytitle = "u (este), v (norte) (m/s)" if lang == "es" else "u (east), v (north) (m/s)"
+        fig.update_layout(yaxis_title=ytitle, hovermode="x unified", **layout(st.dark))
+        if vector and comp in ("uv", "u", "v"):
+            fig.add_hline(y=0, line=dict(color="#999", width=1))
         if used_sta:
             fig.add_annotation(x=0.01, y=0.98, xref="paper", yref="paper", showarrow=False, xanchor="left", font=dict(size=10, color="#555"),
                                text="estaciones: serie fina de staout (en superficie)" if lang == "es" else "stations: fine staout series (surface)")
     st.series_lines = lines
+    shapes0 = list(fig.layout.shapes or []); fig.layout.shapes = ()
     xs, ys, tc = series_cursor(st)
     for (_, _, col), x_, y_ in zip(lines, xs, ys):        # marcador del instante actual en cada serie
         fig.add_trace(go.Scatter(x=[x_], y=[y_], mode="markers", showlegend=False, hoverinfo="skip",
                                  marker=dict(color=col, size=11, line=dict(color="white", width=2))))
-    if lines:
+    if lines:                                              # la línea del instante es la forma 0 (la mueve series_cursor)
         fig.add_shape(type="line", xref="x", yref="paper", x0=tc, x1=tc, y0=0, y1=1, line=dict(color="#888", width=1, dash="dot"))
+    for sh in shapes0:
+        fig.add_shape(sh)
     return fig
 
 
@@ -369,6 +390,9 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         with ui.row().classes("w-full"):
             plist = ui.column().classes("col-12 col-md-3 q-gutter-xs")
             with ui.column().classes("col-12 col-md-9"):
+                st.component = "uv"
+                comp_sel = ui.select({"uv": t["comp_uv"], "u": t["comp_u"], "v": t["comp_v"], "mag": t["comp_mag"]}, value="uv",
+                                     label=t["component"]).props("dense").classes("sl-w-md").mark("component_select")
                 sfig = ui.plotly(series_figure_multi(st, st.var, lang, wd)).classes("w-full").style("height:320px")
                 pfig = ui.plotly(go.Figure()).classes("w-full").style("height:300px")
         with ui.row().classes("q-gutter-sm"):
@@ -452,16 +476,33 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         refresh_points_list(); refresh_map(); refresh_series()
     def remove_point(i):
         st.points.pop(i); refresh_points_list(); refresh_map(); refresh_series()
+    def is_vector(v):
+        return (v + "X") in ds
     def refresh_series():
+        comp_sel.set_visibility(is_vector(st.var))
         sfig.update_figure(series_figure_multi(st, st.var, lang, wd))
-        if st.points and st.is3d(st.var):
-            p = st.points[-1]
-            z = st.vg.zcor(np.array([float(ds.depth.isel(node=p["node"]))]), np.array([float(ds.elevation.isel(node=p["node"], time=st.it))]))[0] if "elevation" in ds else st.vg.zcor(np.array([float(ds.depth.isel(node=p["node"]))]))[0]
-            if "zCoordinates" in ds:
-                z = ds.zCoordinates.isel(node=p["node"], time=st.it).values
-            pfig.update_figure(themed(profile_figure(ds, st.var, p["node"], z, st.it, lang), st.dark)); pfig.set_visibility(True)
-        else:
-            pfig.set_visibility(False)
+        refresh_profile()
+    prof_range = {}
+    def refresh_profile():
+        """Perfil vertical del último punto en el instante del mapa, con el eje x fijo en toda la simulación."""
+        if not (st.points and st.is3d(st.var)):
+            pfig.set_visibility(False); return
+        p = st.points[-1]; node = p["node"]
+        z = st.vg.zcor(np.array([float(ds.depth.isel(node=node))]), np.array([float(ds.elevation.isel(node=node, time=st.it))]))[0] if "elevation" in ds else st.vg.zcor(np.array([float(ds.depth.isel(node=node))]))[0]
+        if "zCoordinates" in ds:
+            z = ds.zCoordinates.isel(node=node, time=st.it).values
+        key = (st.var, node)
+        if key not in prof_range:
+            arrs = [ds[st.var + "X"].isel(node=node).values, ds[st.var + "Y"].isel(node=node).values] if is_vector(st.var) else [ds[st.var].isel(node=node).values]
+            a = np.concatenate([np.ravel(x) for x in arrs]); a = a[np.isfinite(a)]
+            lo, hi = (float(a.min()), float(a.max())) if a.size else (0.0, 1.0)
+            pad = 0.05 * (hi - lo or 1.0); prof_range[key] = (lo - pad, hi + pad)
+        f = profile_figure(ds, st.var, node, z, st.it, lang)
+        f.update_layout(xaxis_range=list(prof_range[key]),
+                        title=f"{p['name']} · " + np.datetime_as_string(ds.time.values[st.it], "m").replace("T", " "))
+        if is_vector(st.var):
+            f.add_vline(x=0, line=dict(color="#999", width=1))
+        pfig.update_figure(themed(f, st.dark)); pfig.set_visibility(True)
     def refresh_sections_list():
         slist.clear()
         with slist:
@@ -523,6 +564,8 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             sfig.update_figure(series_figure_multi(st, st.var, lang, wd))
     def on_time(e):
         st.it = int(e.value); refresh_time_label(); refresh_map_time(); move_cursor()
+        if not in_sections():
+            refresh_profile()                                      # el perfil vertical sigue al tiempo
         if state_sec["active"] is not None and in_sections():     # la sección sigue al tiempo solo si se está viendo
             show_section(state_sec["active"], switch=False)
     def refresh_range():
@@ -658,6 +701,7 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         st.click_mode = "section" if in_sections() else "point"; st.pending = None; armed["mode"] = None; refresh_map()
     panels.on_value_change(on_subtab)
     tsl.on_value_change(on_time)
+    comp_sel.on_value_change(lambda e: (setattr(st, "component", e.value), sfig.update_figure(series_figure_multi(st, st.var, lang, wd))))
     svar.on_value_change(lambda e: show_section(state_sec["active"])); scont.on_value_change(lambda e: show_section(state_sec["active"])); wf.on_value_change(lambda e: show_section(state_sec["active"]))
     plot.on("plotly_click", on_click, js_handler=CLICK_JS); plot.on("plotly_relayout", on_relayout)
     lsl_box.set_visibility(st.nvrt > 1); ldep.set_visibility(False); ival.set_visibility(False); dmode.set_visibility(st.nvrt > 1)

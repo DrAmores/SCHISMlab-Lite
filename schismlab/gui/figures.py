@@ -169,12 +169,14 @@ def series_figure(ds: xr.Dataset, var: str, node: int, layer: int = -1, extra: d
 
 def profile_figure(ds: xr.Dataset, var: str, node: int, z: np.ndarray, it: int = -1, lang: str = "es") -> go.Figure:
     fig = go.Figure()
-    if var + "X" in ds:
+    if var + "X" in ds:                                   # vector: u (hacia el este) continua, v (hacia el norte) discontinua
         fig.add_trace(go.Scatter(x=ds[var + "X"].isel(node=node, time=it).values, y=z, mode="lines+markers", name="u"))
-        fig.add_trace(go.Scatter(x=ds[var + "Y"].isel(node=node, time=it).values, y=z, mode="lines+markers", name="v"))
+        fig.add_trace(go.Scatter(x=ds[var + "Y"].isel(node=node, time=it).values, y=z, mode="lines+markers", name="v", line=dict(dash="dash")))
+        xt = "u (este), v (norte) (m/s)" if lang == "es" else "u (east), v (north) (m/s)"
     else:
         fig.add_trace(go.Scatter(x=ds[var].isel(node=node, time=it).values, y=z, mode="lines+markers", name=var))
-    fig.update_layout(xaxis_title=label(var, lang), yaxis_title="z (m)", **LAYOUT)
+        xt = label(var, lang)
+    fig.update_layout(xaxis_title=xt, yaxis_title="z (m)", **LAYOUT)
     return fig
 
 

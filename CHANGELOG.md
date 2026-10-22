@@ -3,6 +3,14 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.5.3 (2026-10-22) — Resultados: componentes de la velocidad y perfil animado
+
+- Puntos: las series de la velocidad muestran sus **componentes u (hacia el este) y v (hacia el norte)**, con una línea
+  en cero, y no solo el módulo. Un selector elige u y v, solo u, solo v o el módulo. Sirve para ver hacia dónde gira
+  la corriente (práctica de oscilaciones inerciales).
+- El **perfil vertical** del punto se mueve con el tiempo al arrastrar el instante o al reproducir la película, con el
+  eje fijo en toda la simulación para que se vea el giro con la profundidad.
+
 ## 0.5.2 (2026-10-22) — Resultados: el instante del mapa en las series
 
 - Puntos: en las series temporales, un punto en cada curva y una línea vertical marcan el instante que muestra el mapa,
