@@ -493,9 +493,25 @@ def hovmoller_figure(sec, var: str, layer: int = -1, lang: str = "es", dark: boo
     return fig
 
 
-def _ref_lines(fig, refs: dict, xaxis_period: bool = True):
+def _ref_lines(fig, refs: dict, xaxis_period: bool = True, xr: tuple | None = None):
+    """Líneas de los periodos de referencia (inercial, mareas) en un eje x logarítmico. En Plotly las anotaciones de un
+    eje log van en log10: con add_vline(annotation_text=...) la etiqueta de 12,4 h acababa en 10^12,4 h y el eje se
+    estiraba hasta 10^24. Solo se dibujan las que caen dentro del rango `xr` (en h)."""
     for k, ph in refs.items():
-        fig.add_vline(x=ph, line=dict(color="#888", dash="dot", width=1), annotation_text=k, annotation_position="top", annotation_font_size=9)
+        if not (ph and np.isfinite(ph) and ph > 0) or (xr and not (xr[0] <= ph <= xr[1])):
+            continue
+        fig.add_shape(type="line", xref="x", yref="paper", x0=ph, x1=ph, y0=0, y1=1, line=dict(color="#888", dash="dot", width=1))
+        fig.add_annotation(x=float(np.log10(ph)), xref="x", y=1, yref="paper", yanchor="bottom", text=k, showarrow=False, font=dict(size=9))
+
+
+def _log_range(v, pad: float = 0.05) -> list:
+    """Rango de un eje log (en log10) ajustado a los valores positivos y finitos de `v`."""
+    v = np.asarray(v, float); v = v[np.isfinite(v) & (v > 0)]
+    if not v.size:
+        return None
+    lo, hi = np.log10(v.min()), np.log10(v.max())
+    d = (hi - lo) * pad if hi > lo else 0.1
+    return [float(lo - d), float(hi + d)]
 
 
 def psd_figure(r: dict, refs: dict | None = None, name: str = "", lang: str = "es", resolvable=None, dark: bool = False) -> go.Figure:
@@ -504,11 +520,13 @@ def psd_figure(r: dict, refs: dict | None = None, name: str = "", lang: str = "e
     fig.add_trace(go.Scatter(x=r["period_h"], y=r["lo"], mode="lines", line=dict(width=0), fill="tonexty", fillcolor="rgba(14,154,167,0.15)", hoverinfo="skip", name="IC 95 %"))
     fig.add_trace(go.Scatter(x=r["period_h"], y=r["P"], mode="lines", line=dict(color="#0e9aa7", width=2), name=name or "PSD",
                              hovertemplate="T %{x:.2f} h<br>%{y:.3g}<extra></extra>"))
+    xr = _log_range(r["period_h"])
     if refs:
-        _ref_lines(fig, refs)
+        _ref_lines(fig, refs, xr=(10 ** xr[0], 10 ** xr[1]) if xr else None)
     if resolvable:
         fig.add_vrect(x0=resolvable[1] / 3600, x1=max(r["period_h"].max(), resolvable[1] / 3600 * 1.01), fillcolor="rgba(0,0,0,0.08)", line_width=0)
-    fig.update_layout(xaxis=dict(title="periodo (h)" if lang == "es" else "period (h)", type="log"), yaxis=dict(title="PSD (unidades²/cph)" if lang == "es" else "PSD (units²/cph)", type="log"), **layout(dark))
+    fig.update_layout(xaxis=dict(title="periodo (h)" if lang == "es" else "period (h)", type="log", range=xr),
+                      yaxis=dict(title="PSD (unidades²/cph)" if lang == "es" else "PSD (units²/cph)", type="log", range=_log_range(r["P"], 0.08)), **layout(dark))
     return fig
 
 
@@ -516,9 +534,12 @@ def rotary_figure(r: dict, refs: dict | None = None, lang: str = "es", dark: boo
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=r["period_h"], y=r["cw"], mode="lines", name="horario (CW)" if lang == "es" else "clockwise (CW)", line=dict(color="#2b2b2b", width=2)))
     fig.add_trace(go.Scatter(x=r["period_h"], y=r["ccw"], mode="lines", name="antihorario (CCW)" if lang == "es" else "counter-clockwise (CCW)", line=dict(color="#0e9aa7", width=2)))
+    xr = _log_range(r["period_h"])
     if refs:
-        _ref_lines(fig, refs)
-    fig.update_layout(xaxis=dict(title="periodo (h)" if lang == "es" else "period (h)", type="log"), yaxis=dict(title="PSD (unidades²/cph)" if lang == "es" else "PSD (units²/cph)", type="log"), **layout(dark))
+        _ref_lines(fig, refs, xr=(10 ** xr[0], 10 ** xr[1]) if xr else None)
+    fig.update_layout(xaxis=dict(title="periodo (h)" if lang == "es" else "period (h)", type="log", range=xr),
+                      yaxis=dict(title="PSD (unidades²/cph)" if lang == "es" else "PSD (units²/cph)", type="log",
+                                 range=_log_range(np.concatenate([np.ravel(r["cw"]), np.ravel(r["ccw"])]), 0.08)), **layout(dark))
     return fig
 
 
@@ -542,13 +563,18 @@ def wavelet_figure(w: dict, t0=None, refs: dict | None = None, lang: str = "es",
     fig.add_trace(go.Scatter(x=w["glob"], y=ph, mode="lines", line=dict(color="#0e9aa7", width=2), name=global_name, showlegend=False,
                              hovertemplate="T %{y:.2f} h<br>P %{x:.3g}<extra>" + global_name + "</extra>"), row=1, col=2)
     fig.add_trace(go.Scatter(x=w["glob_signif"], y=ph, mode="lines", line=dict(color="#888", dash="dash"), name="95 %", showlegend=False), row=1, col=2)
-    if refs:
+    yr = _log_range(ph, 0.0)
+    if refs:                                               # en eje log las anotaciones van en log10 (ver _ref_lines)
         for k, p in refs.items():
-            fig.add_hline(y=p, line=dict(color="#fff", dash="dot", width=1), annotation_text=k, annotation_position="right", annotation_font_size=9, row=1, col=1)
-    fig.update_yaxes(type="log", title_text="periodo (h)" if lang == "es" else "period (h)", row=1, col=1)
-    fig.update_yaxes(type="log", row=1, col=2)
-    fig.update_xaxes(type="log", title_text="P global", row=1, col=2)
-    fig.update_layout(**{**layout(dark), "margin": dict(l=40, r=70, t=40, b=40)})
+            if not (p and np.isfinite(p) and ph.min() <= p <= ph.max()):
+                continue
+            fig.add_shape(type="line", xref="x domain", yref="y", x0=0, x1=1, y0=p, y1=p, line=dict(color="#fff", dash="dot", width=1))
+            fig.add_annotation(x=1, xref="x domain", y=float(np.log10(p)), yref="y", xanchor="left", text=k, showarrow=False, font=dict(size=9))
+    fig.update_yaxes(type="log", title_text="periodo (h)" if lang == "es" else "period (h)", range=yr, row=1, col=1)
+    fig.update_yaxes(type="log", range=yr, row=1, col=2)
+    gl = np.concatenate([np.ravel(w["glob"]), np.ravel(w["glob_signif"])])
+    fig.update_xaxes(type="log", title_text="P global", range=_log_range(gl, 0.08), row=1, col=2)
+    fig.update_layout(**{**layout(dark), "margin": dict(l=40, r=70, t=40, b=40), "showlegend": False})
     return fig
 
 

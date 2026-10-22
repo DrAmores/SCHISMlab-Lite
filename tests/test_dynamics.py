@@ -243,3 +243,26 @@ def test_explorer_series_velocity_components():
     g = series_figure_multi(st, "depthAverageVel", "es")
     assert [d.name.split()[-1] for d in g.data if d.mode == "lines"] == ["|u|"] and np.allclose(g.data[0].y, 1.0)
     assert series_cursor(st)[1] == [pytest.approx(1.0)]
+
+
+def test_spectrum_axes_fit_the_data():
+    """Espectro, rotatorio y wavelet: los ejes log se ajustan a los periodos de los datos y las etiquetas de las líneas
+    de referencia van en log10 (antes la de M2 acababa en 10^12 h y el eje llegaba a 10^24)."""
+    pytest.importorskip("plotly")
+    from schismlab.analysis.signal import psd_welch, rotary_spectrum, wavelet_morlet
+    from schismlab.gui.figures import psd_figure, rotary_figure, wavelet_figure
+    dt = 1800.0; tt = np.arange(0, 6 * 86400, dt)
+    u = np.cos(2 * np.pi * tt / (12.42 * 3600)) + 0.1 * np.random.default_rng(0).normal(size=tt.size); v = np.sin(2 * np.pi * tt / (17 * 3600))
+    refs = {"M2": 12.42, "K1": 23.93, "inercial": 17.0, "O1": 25.82, "lejos": 1e6}
+    r = psd_welch(u, dt, nperseg=128)
+    f = psd_figure(r, refs, "x")
+    lo, hi = f.layout.xaxis.range
+    assert 10 ** lo >= r["period_h"].min() * 0.5 and 10 ** hi <= r["period_h"].max() * 2
+    ann = {a.text: a.x for a in f.layout.annotations}
+    assert ann["M2"] == pytest.approx(np.log10(12.42)) and "lejos" not in ann
+    g = rotary_figure(rotary_spectrum(u, v, dt, nperseg=128), refs)
+    assert 10 ** g.layout.xaxis.range[1] <= r["period_h"].max() * 2
+    w = wavelet_morlet(u, dt)
+    h = wavelet_figure(w, None, refs)
+    yl, yh = h.layout.yaxis.range
+    assert 10 ** yh <= (w["period"] / 3600).max() * 1.01 and all(abs(a.y) < 3 for a in h.layout.annotations)

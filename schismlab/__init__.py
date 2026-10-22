@@ -1,2 +1,2 @@
 """SCHISMlab: entorno docente para simular con SCHISM de cero."""
-__version__ = "0.5.3"
+__version__ = "0.5.4"

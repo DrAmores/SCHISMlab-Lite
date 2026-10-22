@@ -3,6 +3,12 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.5.4 (2026-10-22) — Resultados: escalas de espectros y wavelets
+
+- Espectro, espectro rotatorio y wavelet ajustan sus ejes a los periodos y potencias de los datos. Antes las etiquetas
+  de las líneas de referencia (inercial, M2, K1…) se colocaban mal en los ejes logarítmicos y estiraban la escala hasta
+  10²⁴ h, y los datos quedaban en una esquina. Solo se marcan las referencias que caen dentro de los datos.
+
 ## 0.5.3 (2026-10-22) — Resultados: componentes de la velocidad y perfil animado
 
 - Puntos: las series de la velocidad muestran sus **componentes u (hacia el este) y v (hacia el norte)**, con una línea
