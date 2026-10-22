@@ -205,3 +205,50 @@ async def test_new_case_matches_edition(user: User, tmp_path):
     await user.should_see("Generar malla")
     if not is_pro():
         await user.should_not_see("Este caso usa una malla con costa real")
+
+
+async def test_results_play_button_restore_stations_and_tabs(user: User, tmp_path, monkeypatch):
+    """Botón de reproducción centrado (sin el relleno de la fila), estaciones borradas recuperables y la reproducción
+    no salta a la pestaña Secciones."""
+    import asyncio
+    from nicegui import ui
+    from schismlab.gui import state
+    from test_explorer import make_case
+    monkeypatch.setattr(state, "USER_CASES", tmp_path / "cases")
+    p = make_case(tmp_path / "cases")
+    await user.open(f"/results?case={p}&tab=maps")
+    await user.should_see("Puntos")
+    play = next(iter(user.find(marker="play_button").elements))
+    assert play.parent_slot.parent.tag == "div" and "q-col-gutter-sm" not in play.parent_slot.parent.classes
+    # borrar la estación y recuperarla
+    def names():
+        try:
+            return [e.value for e in user.find(ui.input).elements if e.value in ("centro",)]
+        except AssertionError:                        # en Lite, sin la estación no queda ningún campo de texto
+            return []
+    assert names() == ["centro"]
+    close = [b for b in user.find(ui.button).elements if b._props.get("icon") == "close"]
+    next(h.handler for h in close[0]._event_listeners.values() if h.type == "click")(None)
+    await asyncio.sleep(0.1)
+    assert names() == []
+    await user.should_see("Recuperar estaciones borradas (1)")
+    rb = next(iter(user.find(marker="restore_stations").elements))
+    next(h.handler for h in rb._event_listeners.values() if h.type == "click")(None)
+    await asyncio.sleep(0.1)
+    assert names() == ["centro"]
+    # una sección vista y vuelta a Puntos: mover el tiempo no cambia de pestaña
+    plot = next(iter(user.find(marker="map_plot").elements))
+    tp = [e for e in user.find(ui.tab_panels).elements if any(getattr(c, "_props", {}).get("name") == "tab_points" for c in e.default_slot.children)]
+    panels = tp[0]
+    tr = next(iter(user.find(marker="sec_transversal").elements))
+    next(h.handler for h in tr._event_listeners.values() if h.type == "click")(None)
+
+    class E:
+        args = {"points": [{"x": 1.0, "y": 40.25}]}
+    next(h.handler for h in plot._event_listeners.values() if h.type == "plotly_click")(E())
+    assert "tab_sections" in str(panels.value)
+    panels.set_value("tab_points")
+    tsl = next(iter(user.find(marker="time_slider").elements))
+    tsl.set_value(3); tsl.set_value(4)
+    await asyncio.sleep(0.1)
+    assert "tab_points" in str(panels.value)

@@ -3,6 +3,13 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.5.1 (2026-10-22) — Resultados: reproducción y puntos
+
+- El icono del botón de reproducción (play/pausa) del mapa queda centrado.
+- Puntos: si se borra una estación del caso, aparece «Recuperar estaciones borradas» para volver a ponerlas.
+- Al reproducir la película del mapa ya no salta a la pestaña Secciones: la sección se sigue actualizando solo si se
+  está viendo, y se puede mirar la pestaña Puntos durante la reproducción.
+
 ## 0.5.0 (2026-10-22)
 
 - Sin cambios en SCHISMlab Lite (versión a la par con SCHISMlab Pro, que añade los proyectos con varias simulaciones).

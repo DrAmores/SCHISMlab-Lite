@@ -306,6 +306,7 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         x_, y_ = (s_.get("lon"), s_.get("lat")) if "lon" in s_ else (s_.get("x"), s_.get("y"))
         if x_ is not None and y_ is not None:
             st.add_point(float(x_), float(y_), str(s_.get("name", f"E{len(st.points)}")), station=True)
+    initial_points = [dict(p) for p in st.points]                # para poder recuperar las estaciones borradas
     has_vel = "horizontalVelX" in ds or "depthAverageVelX" in ds
     # --- controles: encima del mapa solo variable, capa y tiempo; el estilo va en un acordeón plegado bajo el mapa
     def layer_text(k: int) -> str:
@@ -317,7 +318,8 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             lsl = ui.slider(min=0, max=max(0, st.nvrt - 1), value=st.layer).props(f'label-always label-value="{layer_text(st.layer)}"').classes("w-full")
         ldep = ui.number(t["depth_fixed"], value=st.depth_m, min=0, step=5).classes("sl-w-sm")
         ival = ui.number(t["iso_value"], value=st.iso_value, step=0.5).classes("sl-w-sm").mark("iso_value")
-        play = ui.button(icon="play_arrow").props("round dense color=accent").classes("q-ml-sm")
+        with ui.element("div").classes("q-ml-sm"):                # el relleno de q-col-gutter va al envoltorio, no al botón
+            play = ui.button(icon="play_arrow").props("round dense color=accent").mark("play_button")
         with ui.column().style("flex:3 1 220px;min-width:180px;padding-top:2px"):
             tsl = ui.slider(min=0, max=ds.time.size - 1, value=st.it).classes("w-full").mark("time_slider")
         tlabel = ui.label().classes("text-caption text-no-wrap")
@@ -412,6 +414,17 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
                 nx = ui.number("lon" if st.geo else "x", value=round(float(ds.x.mean()), 4)).props("dense").classes("sl-w-sm")
                 ny = ui.number("lat" if st.geo else "y", value=round(float(ds.y.mean()), 4)).props("dense").classes("sl-w-sm")
                 ui.button(icon="add", on_click=lambda: (st.add_point(float(nx.value), float(ny.value)), refresh_points_list(), refresh_map(), refresh_series())).props("flat dense round")
+            have = {(p["name"], p["node"]) for p in st.points}
+            missing = [p for p in initial_points if (p["name"], p["node"]) not in have]
+            if missing:
+                ui.button(t["restore_stations"].format(n=len(missing)), icon="restore", on_click=lambda: restore_points()) \
+                    .props("flat dense no-caps color=primary").mark("restore_stations")
+    def restore_points():
+        have = {(p["name"], p["node"]) for p in st.points}
+        for p in initial_points:
+            if (p["name"], p["node"]) not in have:
+                st.add_point(float(p["x"]), float(p["y"]), p["name"], station=bool(p.get("station")))
+        refresh_points_list(); refresh_map(); refresh_series()
     def remove_point(i):
         st.points.pop(i); refresh_points_list(); refresh_map(); refresh_series()
     def refresh_series():
@@ -441,7 +454,8 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
     def remove_section(i):
         st.sections.pop(i); state_sec["active"] = None if not st.sections else min(i, len(st.sections) - 1)
         refresh_sections_list(); refresh_map(); show_section(state_sec["active"])
-    def show_section(i):
+    def show_section(i, switch: bool = True):
+        """Dibuja la sección i; `switch` lleva a la pestaña Secciones (solo cuando lo pide el usuario, no al reproducir)."""
         if i is None or i >= len(st.sections):
             secfig.update_figure(go.Figure()); return
         state_sec["active"] = i
@@ -455,7 +469,8 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             secfig.update_figure(section_figure2(s["sec"], svar.value, st.it, arrows=arr.value, contours=scont.value, wfactor=float(wf.value or 200), zrange=zr, lang=lang, dark=st.dark, iso=iso))
         except Exception as ex:   # noqa: BLE001
             ui.notify(f"{t['sections']}: {ex}", type="warning")
-        panels.set_value(tsec)
+        if switch:
+            panels.set_value(tsec)
     def show_hov():
         i = state_sec["active"]
         if i is None:
@@ -467,15 +482,15 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         hovfig.set_visibility(True)
     def on_time(e):
         st.it = int(e.value); refresh_time_label(); refresh_map_time()
-        if state_sec["active"] is not None:
-            show_section(state_sec["active"])
+        if state_sec["active"] is not None and in_sections():     # la sección sigue al tiempo solo si se está viendo
+            show_section(state_sec["active"], switch=False)
     def refresh_range():
         st.zr = dataset_range(ds, st.var, st.layer) if st.depth_mode == "layer" else (st.iso_range() if st.iso_ok() else None)
     def on_var(e):
         st.var = e.value; refresh_range()
         refresh_map(); refresh_series()
         if state_sec["active"] is not None and st.depth_mode == "iso":
-            show_section(state_sec["active"])
+            show_section(state_sec["active"], switch=False)
     def on_layer(e):
         st.layer = int(e.value); st.zr = dataset_range(ds, st.var, st.layer)
         lsl.props(f'label-value="{layer_text(st.layer)}"'); refresh_map(); refresh_series()
@@ -485,11 +500,11 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             ui.notify(t["iso_needs_3d"], type="warning")
         refresh_range(); refresh_map(); refresh_series()
         if state_sec["active"] is not None:
-            show_section(state_sec["active"])
+            show_section(state_sec["active"], switch=False)
     def on_iso(e):
         st.iso_value = float(e.value if e.value is not None else 0.0); refresh_range(); refresh_map(); refresh_series()
         if state_sec["active"] is not None:
-            show_section(state_sec["active"])
+            show_section(state_sec["active"], switch=False)
     def on_click(e):
         pts = e.args.get("points", [])
         if not pts:
@@ -586,7 +601,7 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
     play.on_click(toggle_play)
     speed.on_value_change(lambda e: setattr(timer, "interval", 1 / float(e.value)))
     var.on_value_change(on_var); lsl.on_value_change(on_layer); dmode.on_value_change(on_dmode); ldep.on_value_change(lambda e: (setattr(st, "depth_m", float(e.value or 0)), refresh_map())); ival.on_value_change(on_iso)
-    arr.on_value_change(lambda e: (setattr(st, "arrows", bool(e.value)), refresh_map(), show_section(state_sec["active"]) if state_sec["active"] is not None else None))
+    arr.on_value_change(lambda e: (setattr(st, "arrows", bool(e.value)), refresh_map(), show_section(state_sec["active"], switch=False) if state_sec["active"] is not None else None))
     fixed.on_value_change(lambda e: (setattr(st, "fixed", bool(e.value)), refresh_map()))
     mesh_sw.on_value_change(lambda e: (setattr(st, "show_mesh", bool(e.value)), refresh_map()))
     bg.on_value_change(lambda e: (setattr(st, "background", e.value), refresh_map()))
