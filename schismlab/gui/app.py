@@ -21,9 +21,14 @@ STEPS = [("mesh", "/mesh", "grid_on"), ("model", "/model", "tune"), ("forcing", 
          ("params", "/params", "list_alt"), ("run", "/run", "play_circle"), ("results", "/results", "insights")]
 
 
+def steps() -> list:
+    """Pasos del panel lateral; en Pro, «Simulaciones» (proyectos con varias simulaciones) antes de Ejecutar."""
+    return STEPS[:5] + [("runs", "/runs", "account_tree")] + STEPS[5:] if is_pro() else STEPS
+
+
 def next_step(step: str) -> str | None:
-    keys = [k for k, _, _ in STEPS]
-    return STEPS[keys.index(step) + 1][1] if step in keys and keys.index(step) + 1 < len(keys) else None
+    st = steps(); keys = [k for k, _, _ in st]
+    return st[keys.index(step) + 1][1] if step in keys and keys.index(step) + 1 < len(keys) else None
 
 
 def case_summary(c: dict, t: dict) -> list[tuple[str, str]]:
@@ -87,8 +92,48 @@ def case_info() -> CaseInfo | None:
 
 
 def workdir() -> Path:
+    """Carpeta del caso (en un proyecto, la del caso base: malla y páginas de edición)."""
     from ..case import Case
     return Case(case_path()).workdir
+
+
+def active_member() -> str | None:
+    """Simulación del proyecto elegida en la cabecera (Pro); None = el caso base."""
+    if not is_pro():
+        return None
+    p = case_path()
+    name = (S().get("members") or {}).get(str(p)) if p else None
+    if not name:
+        return None
+    try:
+        c = load_cfg(p)
+        if c.get("runs"):
+            from ..edition import pro as _pro
+            if name in {m.name for m in _pro("runs.members").expand(c)}:
+                return name
+    except Exception:   # noqa: BLE001
+        pass
+    return None
+
+
+def set_member(name: str | None) -> None:
+    d = dict(S().get("members") or {}); d[str(case_path())] = name or None; S().update(members=d)
+
+
+def run_workdir() -> Path:
+    """Carpeta que se ejecuta y se ve en Resultados: la de la simulación elegida o la del caso."""
+    m = active_member()
+    return workdir() / "runs" / m if m else workdir()
+
+
+def cfg_run() -> dict:
+    """Configuración de lo que se ejecuta: la resuelta de la simulación elegida o la del caso."""
+    m = active_member()
+    if not m:
+        return cfg()
+    from ..case import Case
+    from ..edition import pro as _pro
+    return _pro("runs.project").member_case(Case(case_path()), m).cfg
 
 
 def cfg() -> dict:
@@ -431,6 +476,17 @@ def layout(step: str):
                     ui.menu_item(t["export"], on_click=lambda: export_dialog(ci, t))
                     ui.separator()
                     ui.menu_item(t["change_case"], on_click=lambda: ui.navigate.to("/"))
+            if is_pro():                                     # proyecto: qué simulación se ejecuta y se ve
+                try:
+                    _c = load_cfg(ci.path)
+                    from ..edition import pro as _pro
+                    _ms = [m.name for m in _pro("runs.members").expand(_c)] if _c.get("runs") else []
+                except Exception:   # noqa: BLE001
+                    _ms = []
+                if _ms:
+                    ui.select({"": t["base_case"], **{n: n for n in _ms}}, value=active_member() or "",
+                              on_change=lambda e: (set_member(e.value or None), ui.navigate.reload())) \
+                        .props("dense options-dense outlined").classes("q-ml-sm").style("min-width:130px").tooltip(t["member_select"])
         ui.toggle({"es": "ES", "en": "EN"}, value=S().get("lang", "es"), on_change=lambda e: (S().update(lang=e.value), ui.navigate.reload())).props("dense unelevated toggle-color=accent").classes("q-ml-sm")
         ui.button(icon="dark_mode" if not dark else "light_mode", on_click=lambda: (S().update(dark=not S().get("dark")), ui.navigate.reload())).props("flat round dense color=primary").tooltip(t["dark"])
         with ui.button(icon="more_vert").props("flat round dense color=primary").tooltip(t["more_menu"]):
@@ -478,8 +534,8 @@ def layout(step: str):
                                 status_chip(bool(st.get(k)), t[lab])
                 else:
                     ui.label(t["no_case"]).classes("text-caption text-grey-7 q-mb-md")
-                done = {"mesh": st.get("mesh"), "model": st.get("setup"), "forcing": st.get("setup"), "outputs": st.get("setup"), "params": st.get("setup"), "run": st.get("run"), "results": st.get("run")}
-                for i, (key, path, icon) in enumerate(STEPS, 1):
+                done = {"runs": None, "mesh": st.get("mesh"), "model": st.get("setup"), "forcing": st.get("setup"), "outputs": st.get("setup"), "params": st.get("setup"), "run": st.get("run"), "results": st.get("run")}
+                for i, (key, path, icon) in enumerate(steps(), 1):
                     active = key == step
                     with ui.row().classes(("bg-primary text-white " if active else "text-grey-9 ") + "sl-step items-center full-width no-wrap") \
                             .on("click", lambda p=path: ui.navigate.to(p)):
@@ -686,6 +742,14 @@ def page_home():
                             ui.label(c.name).classes("text-subtitle1 text-weight-bold")
                             if c.theme:
                                 ui.badge(c.theme, color="accent").classes("q-mb-xs")
+                            if is_pro():                                 # proyecto: número de simulaciones
+                                try:
+                                    _rc = load_cfg(c.path).get("runs")
+                                    if _rc:
+                                        from ..edition import pro as _pro
+                                        ui.badge(t["n_sims"].format(n=len(_pro("runs.members").expand(load_cfg(c.path)))), color="secondary").props("outline").classes("q-mb-xs")
+                                except Exception:   # noqa: BLE001
+                                    pass
                             if c.title != c.name:
                                 ui.label(c.title).classes("text-caption text-grey-8").style("min-height:48px")
                             st = c.status()
@@ -2706,7 +2770,9 @@ def page_run():
     with layout("run"):
         if need_case():
             return
-        c = cfg(); wd = workdir()
+        c = cfg_run(); wd = run_workdir(); _mem = active_member()
+        if _mem:
+            ui.label(t["member_select"] + f": {_mem}").classes("text-subtitle2 text-secondary")
         ui.label(t["step_run"]).classes("text-h4 text-primary"); build_chip(c)
         # comprobaciones
         PRO = is_pro()
@@ -2760,7 +2826,8 @@ def page_run():
                 log.clear(); cp = case_path()
                 setup_btn.disable(); stop_setup_btn.set_visibility(True)
                 try:                                            # proceso aparte: se puede detener (descargas de ERA5, CMEMS…)
-                    await run_job_process("schismlab.setup:setup_case_from_yaml", (str(cp),), log,
+                    await run_job_process("schismlab_pro.runs.project:prepare_from_yaml" if _mem else "schismlab.setup:setup_case_from_yaml",
+                                          (str(cp), _mem) if _mem else (str(cp),), log,
                                           on_done=lambda r: ui.notify(t["done"], type="positive"), key=skey)
                 finally:
                     setup_btn.enable(); stop_setup_btn.set_visibility(False)
@@ -2787,7 +2854,7 @@ def page_run():
             async def run_local_():
                 log.clear(); from ..run import run_local
                 from ..run import post_run
-                c_now = cfg()                                   # leer la configuración aquí: en el hilo no hay contexto de interfaz
+                c_now = cfg_run()                                   # leer la configuración aquí: en el hilo no hay contexto de interfaz
                 def _go():
                     rc = run_local(wd, ncores=int(ncores.value))
                     if rc == 0: post_run(wd, c_now)
@@ -2849,7 +2916,7 @@ def page_run():
                             Cluster = _pro_cluster.Cluster
                             if not (wd / "jobid").exists():
                                 ui.notify(t["nothing_running"], type="info"); return
-                            c_now = cfg(); u_now = user.value
+                            c_now = cfg_run(); u_now = user.value
                             def go():
                                 from ..run import post_run
                                 cl = Cluster(u_now); cl.connect(); st = cl.wait((wd / "jobid").read_text().strip(), rundir=wd)
@@ -2885,9 +2952,9 @@ def page_run():
                             cp = case_path(); u_now = user.value
                             def go():
                                 cl = Cluster(u_now); cl.connect()
-                                job = cl.setup(cp, mem=(smem.value or "64G").strip(), partition=part.value, node=node.value or None)
+                                job = cl.setup(cp, mem=(smem.value or "64G").strip(), partition=part.value, node=node.value or None, only=_mem)
                                 cl.wait(job)
-                                r = cl.fetch_setup(wd)
+                                r = cl.fetch_setup(workdir())
                                 if not r["ok"]:
                                     raise RuntimeError(f"{r['state']}: {r['reason']}")
                                 return r["state"]
@@ -2938,14 +3005,20 @@ def _results_content(tab_key: str):
     with layout("results"):
         if need_case():
             return
-        c = cfg(); wd_case = workdir()
+        c = cfg_run(); wd_case = run_workdir()
         head_row = ui.row().classes("items-center w-full q-col-gutter-sm")
         with head_row:
             ui.label(t["step_results"]).classes("text-h4 text-primary")
         from ..run import list_runs
         runs = list_runs(wd_case)
         if not runs:
-            ui.label(t["no_outputs"]).classes("text-h6 text-grey-7"); return
+            ui.label(t["no_outputs"]).classes("text-h6 text-grey-7")
+            if is_pro() and cfg().get("runs"):                # proyecto: el análisis de sus simulaciones no necesita las del base
+                from ..edition import pro as _pro
+                with ui.card().classes("q-pa-md w-full q-mt-md"):
+                    ui.label(t["tab_runs"]).classes("text-subtitle1 text-weight-bold")
+                    _pro("gui.runs").runs_tab(None, c, wd_case, t, S().get("lang", "es"), dark=bool(S().get("dark")))
+            return
         from ..analysis import nearest_node
         # --- qué simulación ver: la actual (outputs/) o una archivada (outputs_<fecha>/)
         sel_key = f"run_sel:{wd_case}"
@@ -3061,20 +3134,36 @@ def _results_content(tab_key: str):
         with rpanels, ui.tab_panel(rtab["compare"]):
             from .figures import difference_figure, series_compare_figure, themed
             others = [ci for ci in gallery() if ci.path != case_path() and ci.status().get("run")]
+            _copts = {}
+            if is_pro() and cfg().get("runs"):                 # proyecto: las demás simulaciones y el caso base
+                from ..edition import pro as _pro
+                for _n in [m.name for m in _pro("runs.members").expand(cfg())]:
+                    _d = workdir() / "runs" / _n
+                    if _d != wd_case and (_d / "outputs").is_dir() and any((_d / "outputs").glob("out2d_*.nc")):
+                        _copts[f"member:{_n}"] = f"{_n} · {t['tab_runs'].lower()}"
+                if wd_case != workdir() and (workdir() / "outputs").is_dir() and any((workdir() / "outputs").glob("out2d_*.nc")):
+                    _copts["member:"] = t["base_case"]
+            _copts.update({str(ci.path): ci.name for ci in others})
             ui.label(t["compare_hint"]).classes("text-caption text-grey-7")
-            if others:
+            if _copts:
                 with ui.row().classes("row wrap q-col-gutter-sm items-center"):
-                    osel = ui.select({str(ci.path): ci.name for ci in others}, value=str(others[0].path), label=t["case"]).classes("sl-w-md")
+                    osel = ui.select(_copts, value=next(iter(_copts)), label=t["case"]).classes("sl-w-md")
                     ccol = ui.column().classes("w-full")
+                def _odir(v):
+                    from ..case import Case
+                    if v.startswith("member:"):
+                        return workdir() / "runs" / v[7:] if v[7:] else workdir()
+                    return Case(Path(v)).workdir
+                def _oname(v):
+                    return (v[7:] or t["base_case"]) if v.startswith("member:") else Path(v).stem
                 async def do_compare():
                     ccol.clear()
-                    from ..case import Case
                     try:
-                        ds2 = await run.io_bound(lambda: get_ds(Case(Path(osel.value)).workdir))
+                        ds2 = await run.io_bound(lambda: get_ds(_odir(osel.value)))
                         disjoint = (float(ds2.x.min()) > float(ds.x.max()) or float(ds2.x.max()) < float(ds.x.min())
                                     or float(ds2.y.min()) > float(ds.y.max()) or float(ds2.y.max()) < float(ds.y.min()))
-                        figs = (difference_figure(ds, ds2, state["var"], state["it"], state["layer"], Path(osel.value).stem),
-                                series_compare_figure(ds, ds2, state["var"], state["node"], state["layer"], case_path().stem, Path(osel.value).stem))
+                        figs = (difference_figure(ds, ds2, state["var"], state["it"], state["layer"], _oname(osel.value)),
+                                series_compare_figure(ds, ds2, state["var"], state["node"], state["layer"], active_member() or case_path().stem, _oname(osel.value)))
                     except Exception as ex:   # noqa: BLE001  (variable no guardada en el otro caso, etc.)
                         ui.notify(f"{t['failed']}: {ex}", type="negative"); return
                     with ccol:
@@ -3338,6 +3427,19 @@ def page_results():
 @ui.page("/analyse")
 def page_analyse():
     _results_content("maps")
+
+
+@ui.page("/runs")
+def page_runs():
+    t = T()
+    with layout("runs"):
+        if need_case():
+            return
+        ui.label(t["step_runs"]).classes("text-h4 text-primary")
+        if not is_pro():
+            pro_notice(t); return
+        from ..edition import pro as _pro
+        _pro("gui.runs").runs_page(t, case_path(), dark=bool(S().get("dark")))
 
 
 @ui.page("/validate")

@@ -3,6 +3,10 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.5.0 (2026-10-22)
+
+- Sin cambios en SCHISMlab Lite (versión a la par con SCHISMlab Pro, que añade los proyectos con varias simulaciones).
+
 ## 0.4.3 (2026-10-22)
 
 - Compilación: si cambia el entorno de pixi, SCHISM se compila desde cero (antes podía fallar con «No rule to make

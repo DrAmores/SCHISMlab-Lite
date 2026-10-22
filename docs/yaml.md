@@ -131,3 +131,5 @@ friction: {manning: 0.025}           # Manning constante
 param: {dt: 30}                      # sobreescrituras directas de param.nml (manda sobre todo lo anterior)
 namelists: {param.nml: {...}, sediment.nml: {...}}   # lo que guarda «Parámetros avanzados»
 ```
+
+

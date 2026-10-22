@@ -16,6 +16,7 @@ _NAMES = {
     "waves": ("oleaje (WWM)", "waves (WWM)"),
     "landcover": ("rugosidad por usos del suelo", "land-cover roughness"),
     "slr": ("subida del nivel del mar", "sea-level rise"),
+    "runs": ("proyecto con varias simulaciones", "project with several simulations"),
 }
 
 
@@ -62,6 +63,8 @@ def pro_feature_keys(cfg: dict) -> list[str]:
         out.append("landcover")
     if float((cfg.get("scenario") or {}).get("sea_level_rise", 0) or 0):
         out.append("slr")
+    if cfg.get("runs"):
+        out.append("runs")
     return out
 
 
