@@ -330,3 +330,75 @@ async def test_mesh_page_opens_with_dict_bottom(user: User, tmp_path):
     p = tmp_path / "sm.yaml"; p.write_text(yaml.safe_dump(cfg))
     await user.open(f"/mesh?case={p}")
     await user.should_see("monte submarino")
+
+
+async def test_results_isolines_over_colour(user: User, tmp_path, monkeypatch):
+    """Isolíneas de la profundidad (o de otra variable) encima del campo de color; las de una variable siguen al tiempo."""
+    import asyncio
+    from schismlab.gui import state
+    from test_explorer import make_case
+    monkeypatch.setattr(state, "USER_CASES", tmp_path / "cases")
+    p = make_case(tmp_path / "cases")
+    await user.open(f"/results?case={p}&tab=maps")
+    await user.should_see("Campo de color")
+    plot = next(iter(user.find(marker="map_plot").elements))
+    iso = next(iter(user.find(marker="isolines_select").elements))
+    iso.set_value("depth"); await asyncio.sleep(0.1)
+    assert plot.figure["data"][0]["type"] == "heatmap" and plot.figure["data"][1]["type"] == "contour"
+    assert plot.figure["data"][1]["contours"]["coloring"] == "none" and "isolíneas" in plot.figure["layout"]["title"]["text"]
+    step = next(iter(user.find(marker="isolines_step").elements)); step.set_value(5); await asyncio.sleep(0.1)
+    assert plot.figure["data"][1]["contours"]["size"] == 5.0
+    calls = []
+    monkeypatch.setattr(type(plot), "run_plot_method", lambda self, name, *a, **k: calls.append((name, a)))
+    tsl = next(iter(user.find(marker="time_slider").elements)); tsl.set_value(1)
+    await asyncio.sleep(0.1)
+    assert any(n == "restyle" and a[1] == [0] for n, a in calls)          # profundidad: vía rápida, solo el campo de color
+    iso.set_value("elevation"); await asyncio.sleep(0.1)
+    tsl.set_value(3); await asyncio.sleep(0.1)
+    assert plot.figure["data"][1]["type"] == "contour" and "03:00" in plot.figure["layout"]["title"]["text"]   # redibujado con niveles nuevos
+
+
+def test_contour_levels_skip_flat_extremes():
+    """Fondo plano de 200 m con un monte: las isolíneas van entre la cima y el fondo, sin la de 200 m (ruido)."""
+    import numpy as np
+    from schismlab.gui.explorer import contour_levels
+    x, y = np.meshgrid(np.linspace(0, 500e3, 101), np.linspace(0, 200e3, 41))
+    h = 200 - 150 * np.exp(-((x - 150e3) ** 2 + (y - 100e3) ** 2) / (2 * 20e3 ** 2)) + 1e-9 * np.random.default_rng(0).normal(size=x.shape)
+    a, b, step = contour_levels(h)
+    assert step in (10.0, 20.0, 25.0) and a > 50 and b < 200
+    assert contour_levels(np.full((5, 5), 7.0)) is None
+    assert contour_levels(h, 50)[2] == 50 and contour_levels(h, 50)[1] == 150
+
+
+async def test_sections_visible_toggle_and_plot_button(user: User, tmp_path, monkeypatch):
+    """Secciones: colores vivos con halo; el ojo las oculta o muestra en el mapa; el botón de gráfico elige cuál se
+    representa (antes el ojo solo redibujaba y parecía no hacer nada)."""
+    import asyncio
+    from schismlab.gui import state
+    from test_explorer import make_case
+    monkeypatch.setattr(state, "USER_CASES", tmp_path / "cases")
+    p = make_case(tmp_path / "cases")
+    await user.open(f"/results?case={p}&tab=maps")
+    await user.should_see("Puntos")
+    plot = next(iter(user.find(marker="map_plot").elements))
+    clk = next(h.handler for h in plot._event_listeners.values() if h.type == "plotly_click")
+
+    class E:
+        def __init__(s, x, y): s.args = {"points": [{"x": x, "y": y}]}
+    tr = next(iter(user.find(marker="sec_transversal").elements))
+    next(h.handler for h in tr._event_listeners.values() if h.type == "click")(None); clk(E(1.0, 40.25))
+    clk(E(0.8, 40.1)); clk(E(1.2, 40.4))
+    await asyncio.sleep(0.2)
+    lay = plot.figure["layout"]
+    assert len(lay["shapes"]) == 2 and lay["shapes"][1]["line"]["color"] != "#2b2b2b"
+    eye = lambda i: next(iter(user.find(marker=f"sec_eye_{i}").elements))
+    next(h.handler for h in eye(0)._event_listeners.values() if h.type == "click")(None)
+    await asyncio.sleep(0.1)
+    assert len(plot.figure["layout"]["shapes"]) == 1 and eye(0)._props["icon"] == "visibility_off"
+    next(h.handler for h in eye(0)._event_listeners.values() if h.type == "click")(None)
+    await asyncio.sleep(0.1)
+    assert len(plot.figure["layout"]["shapes"]) == 2
+    b0 = next(iter(user.find(marker="sec_plot_0").elements))
+    next(h.handler for h in b0._event_listeners.values() if h.type == "click")(None)
+    await asyncio.sleep(0.1)
+    assert "primary" in next(iter(user.find(marker="sec_plot_0").elements))._props.get("color", "")

@@ -17,6 +17,8 @@ from .brand import SERIES as COLORS   # colores de puntos y secciones: los de la
 PLOTLY_CONFIG = {"modeBarButtonsToAdd": ["drawline", "eraseshape"], "displaylogo": False, "scrollZoom": True}
 # plotly_click lleva la traza entera (z del mapa de calor, >1 MB) y el websocket lo rechaza: solo se envían x, y de los puntos
 CLICK_JS = "(e) => emit({points: (e.points || []).map(p => ({x: p.x, y: p.y}))})"
+# secciones: colores vivos (se ven sobre cualquier mapa de color, con un halo blanco debajo)
+SECTION_COLORS = ["#0e9aa7", "#e4572e", "#f3a712", "#a23cff", "#29bf12", "#ff4fa3", "#00b4ff"]
 
 
 class ExplorerState:
@@ -43,6 +45,7 @@ class ExplorerState:
         self.land: list = []; self.bmesh = None           # contexto geográfico (dominios reales): tierra GSHHG y contornos de la malla
         self.show_mesh = False; self.background = "field"  # field | resolution | depth
         self.cmap = "auto"; self.zmanual = None            # escala de colores y rango manual (min, max)
+        self.contour = ""; self.contour_step = 0.0          # isolíneas encima del color: "" | "depth" | una variable; intervalo (0 = auto)
         self._edges = None; self._res = None
         self.dark = False                                  # tema oscuro de la interfaz (figuras con plotly_dark)
 
@@ -126,19 +129,69 @@ class ExplorerState:
             return field_at_depth(ds, var, it, self.depth_m, self.vg)
         return _values(ds, var, it, self.layer)
 
+    def contour_grid(self, it: int):
+        """Campo de las isolíneas en la rejilla del mapa (None si no hay): profundidad (fija) o una variable en el instante."""
+        c = self.contour
+        if not c:
+            return None
+        if c == "depth":
+            return self.sampler.grid(self.ds.depth.values)
+        if c not in self.vars:
+            return None
+        return self.sampler.grid(self.field(c, it))
+
     def add_point(self, x: float, y: float, name: str | None = None, station: bool = False) -> dict:
         from ..analysis import nearest_node
         p = dict(name=name or f"P{len(self.points) + 1}", x=float(x), y=float(y), node=nearest_node(self.ds, x, y), color=COLORS[len(self.points) % len(COLORS)], station=station)
         self.points.append(p); return p
 
     def add_section(self, p0, p1, name: str | None = None) -> dict:
-        s = dict(name=name or f"S{len(self.sections) + 1}", p0=(float(p0[0]), float(p0[1])), p1=(float(p1[0]), float(p1[1])), color=COLORS[len(self.sections) % len(COLORS)])
+        s = dict(name=name or f"S{len(self.sections) + 1}", p0=(float(p0[0]), float(p0[1])), p1=(float(p1[0]), float(p1[1])),
+                 color=SECTION_COLORS[len(self.sections) % len(SECTION_COLORS)], visible=True)
         s["sec"] = Section(self.ds, s["p0"], s["p1"], vg=self.vg, tri=self.tri)
         self.sections.append(s); return s
 
 
 def default_cmap(var: str) -> str:
     return "RdBu_r" if var == "elevation" else ("RdYlBu_r" if var == "temperature" else ("RdBu_r" if var == "verticalVelocity" else "Viridis"))
+
+
+def _nice_step(span: float, n: int = 10) -> float:
+    """Intervalo «redondo» (1, 2, 2.5 o 5 × 10^k) para unas `n` isolíneas en un rango `span`."""
+    if not np.isfinite(span) or span <= 0:
+        return 0.0
+    raw = span / n; k = np.floor(np.log10(raw)); b = raw / 10 ** k
+    return float(next(m for m in (1, 2, 2.5, 5, 10) if b <= m) * 10 ** k)
+
+
+def contour_levels(C, step: float = 0.0):
+    """(inicio, fin, intervalo) de las isolíneas DENTRO del rango del campo (sin los extremos: en un fondo plano el valor
+    extremo es casi todo el dominio y su isolínea dibujaría el ruido de la interpolación). None si el campo es constante."""
+    C = np.asarray(C, float); C = C[np.isfinite(C)]
+    if C.size == 0:
+        return None
+    lo, hi = float(np.nanpercentile(C, 0.5)), float(np.nanpercentile(C, 99.5))
+    if not hi > lo:
+        return None
+    step = float(step) if step and step > 0 else _nice_step(hi - lo)
+    eps = 1e-6 * (hi - lo)
+    a = np.ceil((lo + eps) / step) * step; b = np.floor((hi - eps) / step) * step
+    if b < a:
+        return None
+    return float(a), float(b), step
+
+
+def contour_trace(C, xi, yi, step: float = 0.0, dark: bool = False, name: str = ""):
+    """Isolíneas con etiquetas sobre el mapa de color (None si el campo es constante)."""
+    lv = contour_levels(C, step)
+    if lv is None:
+        return None
+    C = np.asarray(C, float)
+    col = "rgba(255,255,255,0.85)" if dark else "rgba(20,20,20,0.8)"
+    return go.Contour(x=xi, y=yi, z=np.where(np.isfinite(C), C, None).tolist(), showscale=False, hoverinfo="skip", name=name, showlegend=False,
+                      autocontour=False, contours=dict(start=lv[0], end=lv[1], size=lv[2], coloring="none", showlabels=True,
+                                                       labelfont=dict(size=10, color=col)),
+                      line=dict(color=col, width=1))
 
 
 def map_figure(st: ExplorerState, t: dict, lang: str):
@@ -170,6 +223,15 @@ def map_figure(st: ExplorerState, t: dict, lang: str):
         title = f"{label_} · {when}" + (f" · {lvl}" if lvl else "")
     fig = go.Figure(go.Heatmap(x=st.sampler.xi, y=st.sampler.yi, z=Z, colorscale=cs, zmin=zmin, zmax=zmax, zsmooth="best",
                                colorbar=dict(title=label_, thickness=14, tickformat=".3g"), hovertemplate="%{x:.4f}, %{y:.4f}<br>%{z:.3f}<extra></extra>"))
+    C = st.contour_grid(it)
+    st._frame = dict(z=Z, zmin=zmin, zmax=zmax, title=title, C=C)   # para la vía rápida (Plotly 6 codifica z en binario)
+    ctr = contour_trace(C, st.sampler.xi, st.sampler.yi, st.contour_step, st.dark) if C is not None else None
+    if ctr is not None:                                    # isolíneas: siempre la traza 1 (refresh_map_time la actualiza)
+        fig.add_trace(ctr)
+        lv = contour_levels(C, st.contour_step)
+        cname = label("depth", lang).split(" (")[0] if st.contour == "depth" else label(st.contour, lang).split(" (")[0]
+        title += f" · {t['isolines'].lower()}: {cname} {lv[2]:g}"
+        st._frame["title"] = title
     if st.show_mesh:
         ex, ey, step = st.mesh_edges()
         fig.add_trace(go.Scatter(x=ex, y=ey, mode="lines", line=dict(color="rgba(0,0,0,0.35)", width=0.5), hoverinfo="skip", showlegend=False))
@@ -189,9 +251,15 @@ def map_figure(st: ExplorerState, t: dict, lang: str):
     for p in st.points:
         fig.add_trace(go.Scatter(x=[p["x"]], y=[p["y"]], mode="markers+text", text=[p["name"]], textposition="top right", marker=dict(color=p["color"], size=11, line=dict(color="#fff", width=1.5)),
                                  hovertemplate=f"{p['name']}<extra></extra>", showlegend=False))
-    shapes = [dict(type="line", x0=s["p0"][0], y0=s["p0"][1], x1=s["p1"][0], y1=s["p1"][1], line=dict(color=s["color"], width=3), editable=True) for s in st.sections]
-    for s in st.sections:
-        fig.add_annotation(x=s["p1"][0], y=s["p1"][1], text=s["name"], showarrow=False, font=dict(color=s["color"], size=12), xanchor="left")
+    vis = [s for s in st.sections if s.get("visible", True)]
+    st.shape_index = [i for i, s in enumerate(st.sections) if s.get("visible", True)]   # forma k -> sección shape_index[k]
+    for s in vis:                                          # halo blanco: la sección se ve sobre cualquier fondo
+        fig.add_trace(go.Scatter(x=[s["p0"][0], s["p1"][0]], y=[s["p0"][1], s["p1"][1]], mode="lines", line=dict(color="rgba(255,255,255,0.9)", width=7),
+                                 hoverinfo="skip", showlegend=False))
+    shapes = [dict(type="line", x0=s["p0"][0], y0=s["p0"][1], x1=s["p1"][0], y1=s["p1"][1], line=dict(color=s["color"], width=3), editable=True) for s in vis]
+    for s in vis:
+        fig.add_annotation(x=s["p1"][0], y=s["p1"][1], text=f"<b>{s['name']}</b>", showarrow=False, font=dict(color=s["color"], size=13), xanchor="left",
+                           bgcolor="rgba(255,255,255,0.85)", borderpad=2)
     if st.pending is not None:
         fig.add_trace(go.Scatter(x=[st.pending[0]], y=[st.pending[1]], mode="markers", marker=dict(symbol="x", color="#000", size=12), showlegend=False, hoverinfo="skip"))
     # dragmode siempre «zoom»: en «drawline» Plotly no emite plotly_click y los dos clics de la pestaña Secciones no llegarían;
@@ -357,35 +425,47 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
     # --- controles: encima del mapa solo variable, capa y tiempo; el estilo va en un acordeón plegado bajo el mapa
     def layer_text(k: int) -> str:
         return t["surface"] if k >= st.nvrt - 1 else (t["bottom"] if k == 0 else f"{t['layer']} {k + 1}")
-    with ui.row().classes("row wrap q-col-gutter-sm items-center w-full"):
-        var = ui.select(st.vars, value=st.var, label=t["variable"]).classes("sl-w-md").mark("var_select")
-        dmode = ui.select({"layer": t["by_layer"], "depth": t["by_depth"], "iso": t["by_iso"]}, value="layer", label=t["level"]).classes("sl-w-md")
-        with ui.column().style("min-width:150px;max-width:190px;flex:1 1 150px;padding-top:10px") as lsl_box:
-            lsl = ui.slider(min=0, max=max(0, st.nvrt - 1), value=st.layer).props(f'label-always label-value="{layer_text(st.layer)}"').classes("w-full")
-        ldep = ui.number(t["depth_fixed"], value=st.depth_m, min=0, step=5).classes("sl-w-sm")
-        ival = ui.number(t["iso_value"], value=st.iso_value, step=0.5).classes("sl-w-sm").mark("iso_value")
-        with ui.element("div").classes("q-ml-sm"):                # el relleno de q-col-gutter va al envoltorio, no al botón
-            play = ui.button(icon="play_arrow").props("round dense color=accent").mark("play_button")
-        with ui.column().style("flex:3 1 220px;min-width:180px;padding-top:2px"):
-            tsl = ui.slider(min=0, max=ds.time.size - 1, value=st.it).classes("w-full").mark("time_slider")
-        tlabel = ui.label().classes("text-caption text-no-wrap")
-    plot = ui.plotly(themed(map_figure(st, t, lang), st.dark)).classes("w-full").style("height:560px").mark("map_plot")
-    st.plot = plot
-    with ui.expansion(t["map_style"], icon="palette", value=False).classes("sl-exp w-full"):
-        with ui.row().classes("row wrap q-col-gutter-sm items-center w-full"):
-            bg = ui.select({"field": t["bg_field"], "resolution": t["bg_resolution"], "depth": t["bg_depth"]}, value="field", label=t["background"]).classes("sl-w-lg")
-            cmap = ui.select({"auto": t["cmap_auto"], "Viridis": "Viridis", "RdBu_r": "RdBu", "RdYlBu_r": "RdYlBu", "Turbo": "Turbo", "Cividis": "Cividis", "deep": "deep", "thermal": "thermal", "haline": "haline"}, value="auto", label=t["cmap"]).classes("sl-w-sm")
-            zlo = ui.number(t["zmin"], value=None).classes("sl-w-sm"); zhi = ui.number(t["zmax"], value=None).classes("sl-w-sm")
-            ui.button(t["zauto"], icon="autorenew", on_click=lambda: (zlo.set_value(None), zhi.set_value(None), set_manual())).props("flat dense")
-            arr = ui.switch(t["arrows"], value=False); arr.set_visibility(has_vel)
-            fixed = ui.switch(t["fixed_scale"], value=True)
-            mesh_sw = ui.switch(t["show_mesh"], value=False)
-            speed = ui.select({2: "2 fps", 5: "5 fps", 10: "10 fps"}, value=5, label="▶").classes("sl-w-sm")
+    iso_opts = {"": t["iso_none"], "depth": label("depth", lang).split(" (")[0], **{v: v for v in st.vars}}
+    with ui.row().classes("w-full items-start").style("gap:16px;flex-wrap:wrap"):
+        # ------------------------------------------------------------------ controles (columna izquierda)
+        with ui.card().classes("q-pa-md").style("flex:0 0 300px;max-width:100%"):
+            ui.label(t["m_color"]).classes("text-subtitle2")
+            var = ui.select(st.vars, value=st.var, label=t["variable"]).classes("w-full").mark("var_select")
+            dmode = ui.select({"layer": t["by_layer"], "depth": t["by_depth"], "iso": t["by_iso"]}, value="layer", label=t["level"]).classes("w-full")
+            with ui.column().classes("w-full q-pt-md") as lsl_box:
+                lsl = ui.slider(min=0, max=max(0, st.nvrt - 1), value=st.layer).props(f'label-always label-value="{layer_text(st.layer)}"').classes("w-full")
+            ldep = ui.number(t["depth_fixed"], value=st.depth_m, min=0, step=5).classes("w-full")
+            ival = ui.number(t["iso_value"], value=st.iso_value, step=0.5).classes("w-full").mark("iso_value")
+            with ui.expansion(t["map_style"], icon="palette", value=True).classes("sl-exp w-full q-mt-sm"):
+                bg = ui.select({"field": t["bg_field"], "resolution": t["bg_resolution"], "depth": t["bg_depth"]}, value="field", label=t["background"]).classes("w-full")
+                iso_sel = ui.select(iso_opts, value="", label=t["isolines"]).classes("w-full").mark("isolines_select")
+                iso_step = ui.number(t["iso_step"], value=0, min=0, step=1, format="%g").classes("w-full").mark("isolines_step")
+                iso_step.bind_visibility_from(iso_sel, "value", backward=bool)
+                arr = ui.switch(t["arrows"], value=False); arr.set_visibility(has_vel)
+                cmap = ui.select({"auto": t["cmap_auto"], "Viridis": "Viridis", "RdBu_r": "RdBu", "RdYlBu_r": "RdYlBu", "Turbo": "Turbo", "Cividis": "Cividis", "deep": "deep", "thermal": "thermal", "haline": "haline"}, value="auto", label=t["cmap"]).classes("w-full")
+                with ui.row().classes("w-full no-wrap items-end q-gutter-sm"):
+                    zlo = ui.number(t["zmin"], value=None).classes("col"); zhi = ui.number(t["zmax"], value=None).classes("col")
+                    ui.button(icon="autorenew", on_click=lambda: (zlo.set_value(None), zhi.set_value(None), set_manual())).props("flat dense round").tooltip(t["zauto"])
+                fixed = ui.switch(t["fixed_scale"], value=True)
+                mesh_sw = ui.switch(t["show_mesh"], value=False)
+                speed = ui.select({2: "2 fps", 5: "5 fps", 10: "10 fps"}, value=5, label="▶").classes("w-full")
+        # ------------------------------------------------------------------ mapa (derecha)
+        with ui.column().style("flex:1 1 600px;min-width:0") as rcol:
+            with ui.row().classes("items-center w-full no-wrap q-gutter-sm"):
+                with ui.element("div"):                              # el relleno de la fila no entra en el botón
+                    play = ui.button(icon="play_arrow").props("round dense color=accent").mark("play_button")
+                tsl = ui.slider(min=0, max=ds.time.size - 1, value=st.it).classes("col").mark("time_slider")
+                tlabel = ui.label().classes("text-caption text-no-wrap")
+            _ratio = float(np.ptp(ds.y.values) * _aspect(ds.y.values) / max(np.ptp(ds.x.values), 1e-12))
+            _h = int(min(720, max(440, 220 + 620 * _ratio)))                 # alto según la forma del dominio
+            plot = ui.plotly(themed(map_figure(st, t, lang), st.dark)).classes("w-full").style(f"height:{_h}px").mark("map_plot")
+            st.plot = plot
 
     # --- paneles inferiores
-    with ui.tabs().classes("w-full").props("dense no-caps mobile-arrows") as subtabs:
+    with rcol, ui.tabs().classes("w-full").props("dense no-caps mobile-arrows") as subtabs:   # debajo del mapa: se traza y se ve a la vez
         tp = ui.tab("tab_points", label=t["points"]); tsec = ui.tab("tab_sections", label=t["sections"]); tan = ui.tab("tab_anim", label=t["animate"])
-    panels = ui.tab_panels(subtabs, value=tp).classes("w-full")
+    with rcol:
+        panels = ui.tab_panels(subtabs, value=tp).classes("w-full")
     with panels, ui.tab_panel(tp):
         with ui.row().classes("w-full"):
             plist = ui.column().classes("col-12 col-md-3 q-gutter-xs")
@@ -430,21 +510,20 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
     def refresh_map_time():
         """Cambio de instante: solo se reenvían los datos del mapa de calor (traza 0) y el título, con Plotly.restyle /
         relayout en el navegador (~tamaño de z en vez de la figura entera). Si no es posible, la figura completa."""
-        if st.arrows or st.background != "field" or st.pending is not None:
-            refresh_map(); return
+        if st.arrows or st.background != "field" or st.pending is not None or (st.contour and st.contour != "depth"):
+            refresh_map(); return                                       # isolíneas de una variable: niveles nuevos en cada instante
         try:
-            fig = map_figure(st, t, lang)
-            h = fig["data"][0]
-            z = np.asarray(h["z"], float)
-            plot.figure["data"][0]["z"] = z                                 # el servidor conserva la figura coherente
-            plot.figure["layout"]["title"] = fig["layout"].get("title")
+            map_figure(st, t, lang); f = st._frame
+            z = np.asarray(f["z"], float)
             zl = np.where(np.isfinite(z), z, None).tolist()
+            plot.figure["data"][0]["z"] = zl                                # el servidor conserva la figura coherente
+            plot.figure["layout"]["title"] = f["title"]
             upd = {"z": [zl]}
             for k in ("zmin", "zmax"):
-                if h.get(k) is not None:
-                    upd[k] = [float(h[k])]
+                if f.get(k) is not None:
+                    upd[k] = [float(f[k])]
             plot.run_plot_method("restyle", upd, [0])
-            plot.run_plot_method("relayout", {"title.text": fig["layout"]["title"] if isinstance(fig["layout"].get("title"), str) else (fig["layout"].get("title") or {}).get("text", "")})
+            plot.run_plot_method("relayout", {"title.text": f["title"]})
         except Exception:   # noqa: BLE001  (sin navegador o cliente antiguo: ruta de respaldo)
             refresh_map()
     def refresh_time_label():
@@ -512,14 +591,22 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
                     ui.icon("straighten").style(f"color:{s['color']}")
                     ui.input(value=s["name"]).props("dense borderless").style("width:4.5rem").on_value_change(lambda e, s=s: (s.update(name=e.value), refresh_map()))
                     ui.label(f"({s['p0'][0]:.2f}, {s['p0'][1]:.2f}) → ({s['p1'][0]:.2f}, {s['p1'][1]:.2f})").classes("text-caption text-no-wrap")
-                    ui.button(icon="visibility", on_click=lambda i=i: show_section(i)).props("flat dense round size=sm")
+                    active = state_sec["active"] == i
+                    ui.button(icon="show_chart", on_click=lambda i=i: (show_section(i), refresh_sections_list())) \
+                        .props(f"dense round size=sm {'unelevated color=primary' if active else 'flat'}").tooltip(t["sec_plot"]).mark(f"sec_plot_{i}")
+                    ui.button(icon="visibility" if s.get("visible", True) else "visibility_off", on_click=lambda i=i: toggle_section(i)) \
+                        .props("flat dense round size=sm").tooltip(t["sec_toggle"]).mark(f"sec_eye_{i}")
                     ui.button(icon="close", on_click=lambda i=i: remove_section(i)).props("flat dense round size=sm")
             if not st.sections:
                 ui.label(t["no_sections"]).classes("text-caption text-grey-7")
     state_sec = {"active": None}
+    def toggle_section(i):
+        """Muestra u oculta la sección i en el mapa (sigue en la lista y se puede representar)."""
+        st.sections[i]["visible"] = not st.sections[i].get("visible", True)
+        refresh_sections_list(); refresh_map()
     def remove_section(i):
         st.sections.pop(i); state_sec["active"] = None if not st.sections else min(i, len(st.sections) - 1)
-        refresh_sections_list(); refresh_map(); show_section(state_sec["active"])
+        refresh_map(); show_section(state_sec["active"]); refresh_sections_list()
     def show_section(i, switch: bool = True):
         """Dibuja la sección i; `switch` lleva a la pestaña Secciones (solo cuando lo pide el usuario, no al reproducir)."""
         if i is None or i >= len(st.sections):
@@ -602,29 +689,33 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             if st.pending is None:
                 st.pending = (x, y); refresh_map(); ui.notify(t["section_second_click"], timeout=2000)
             else:
-                st.add_section(st.pending, (x, y)); st.pending = None; refresh_sections_list(); refresh_map(); show_section(len(st.sections) - 1)
+                st.add_section(st.pending, (x, y)); st.pending = None; refresh_map(); show_section(len(st.sections) - 1); refresh_sections_list()
         else:
             p0, p1 = preset_section(ds, (x, y), m)
-            st.add_section(p0, p1, f"{'T' if m == 'transversal' else 'L'}{len(st.sections) + 1}"); refresh_sections_list(); refresh_map(); show_section(len(st.sections) - 1)
+            st.add_section(p0, p1, f"{'T' if m == 'transversal' else 'L'}{len(st.sections) + 1}"); refresh_map(); show_section(len(st.sections) - 1); refresh_sections_list()
     def on_relayout(e):
         a = e.args or {}
         if "shapes" in a:                                            # línea nueva dibujada (drawline) o lista completa
             shapes = [sh for sh in a["shapes"] if sh.get("type") == "line"]
-            if len(shapes) > len(st.sections):
-                sh = shapes[-1]; st.add_section((sh["x0"], sh["y0"]), (sh["x1"], sh["y1"])); refresh_sections_list(); refresh_map(); show_section(len(st.sections) - 1)
+            if len(shapes) > len(getattr(st, "shape_index", st.sections)):
+                sh = shapes[-1]; st.add_section((sh["x0"], sh["y0"]), (sh["x1"], sh["y1"])); refresh_map(); show_section(len(st.sections) - 1); refresh_sections_list()
             return
         changed = set()
         for k, v in a.items():
             mm = re.match(r"shapes\[(\d+)\]\.(x0|x1|y0|y1)", k)
             if mm:
-                i, key = int(mm.group(1)), mm.group(2)
+                k_, key = int(mm.group(1)), mm.group(2)
+                idx = getattr(st, "shape_index", list(range(len(st.sections))))
+                i = idx[k_] if k_ < len(idx) else len(st.sections)
                 if i < len(st.sections):
                     s = st.sections[i]; p0, p1 = list(s["p0"]), list(s["p1"])
                     {"x0": lambda: p0.__setitem__(0, float(v)), "y0": lambda: p0.__setitem__(1, float(v)), "x1": lambda: p1.__setitem__(0, float(v)), "y1": lambda: p1.__setitem__(1, float(v))}[key]()
                     s["p0"], s["p1"] = tuple(p0), tuple(p1); changed.add(i)
         for i in changed:                                             # extremos arrastrados: recalcular el corte
             s = st.sections[i]; s["sec"] = Section(ds, s["p0"], s["p1"], vg=st.vg, tri=st.tri)
-            refresh_sections_list(); show_section(i)
+            show_section(i); refresh_sections_list()
+        if changed:
+            refresh_map()                                             # el halo y la etiqueta siguen a la sección
     def export_series():
         import pandas as pd
         cols = {}
@@ -690,6 +781,8 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
     mesh_sw.on_value_change(lambda e: (setattr(st, "show_mesh", bool(e.value)), refresh_map()))
     bg.on_value_change(lambda e: (setattr(st, "background", e.value), refresh_map()))
     cmap.on_value_change(lambda e: (setattr(st, "cmap", e.value), refresh_map()))
+    iso_sel.on_value_change(lambda e: (setattr(st, "contour", e.value or ""), refresh_map()))
+    iso_step.on_value_change(lambda e: (setattr(st, "contour_step", float(e.value or 0)), refresh_map()))
     def set_manual():
         lo, hi = zlo.value, zhi.value
         st.zmanual = (float(lo), float(hi)) if (lo is not None and hi is not None and float(hi) > float(lo)) else None

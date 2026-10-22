@@ -3,6 +3,18 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.5.7 (2026-10-22) — Resultados: isolíneas, nueva disposición de Mapas y series y secciones
+
+- **Isolíneas encima del campo de color** (Estilo del mapa → Isolíneas): la profundidad o cualquier variable, con
+  intervalo automático o elegido, junto con las flechas. Sirve, por ejemplo, para ver si la corriente sigue las
+  isobatas alrededor de un monte o si las flechas son paralelas a las isolíneas de la elevación.
+- **Mapas y series reorganizado** como Partículas: controles en una columna a la izquierda (variable, nivel y Estilo del
+  mapa), el mapa a la derecha con play y tiempo encima, y las pestañas Puntos, Secciones y Animación justo debajo del
+  mapa. El alto del mapa se ajusta a la forma del dominio.
+- **Secciones**: se dibujan con colores vivos y un halo blanco (la segunda salía casi negra y no se veía sobre muchos
+  mapas). El ojo ahora muestra u oculta la sección en el mapa; un botón aparte elige qué sección se representa.
+- La reproducción del mapa vuelve a enviar solo el campo en cada fotograma (con Plotly 6 se redibujaba la figura entera).
+
 ## 0.5.6 (2026-10-22) — Malla idealizada: parámetros de cada fondo explicados
 
 - Al elegir la forma del fondo (plano, pendiente, escalón, canal, plataforma y talud, monte submarino, fórmula) aparece
