@@ -3,6 +3,13 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.5.6 (2026-10-22) — Malla idealizada: parámetros de cada fondo explicados
+
+- Al elegir la forma del fondo (plano, pendiente, escalón, canal, plataforma y talud, monte submarino, fórmula) aparece
+  debajo su fórmula y qué es cada parámetro, con sus unidades, y los parámetros se rellenan con un ejemplo adaptado
+  al tamaño del dominio (p. ej. el monte submarino en el centro, con radio de una décima del dominio).
+- Pro: la página Dominio y malla daba error 500 con un fondo idealizado guardado como forma (p. ej. monte submarino).
+
 ## 0.5.5 (2026-10-22) — Resultados: pestaña Partículas renovada
 
 - Controles en una columna a la izquierda: **variable y capa del campo de fondo** propias (ya no hay que ir a Mapas y

@@ -963,6 +963,8 @@ def page_mesh():
                 all_sources = _pro_data_bathymetry.all_sources
                 from ..mesh.build import bathymetry_layers
                 base_src, layers = bathymetry_layers(m)
+                if not isinstance(base_src, str):                 # fondo idealizado (número o {kind: ...}): no es una fuente real
+                    base_src, layers = "gebco2021", []
                 layers = [dict(l) for l in layers]
                 inu0 = m.get("inundation") or {}
                 urb0 = inu0.get("urban") or {}
@@ -1347,14 +1349,43 @@ def page_mesh():
                         geo_size.set_text("")
             geo.on_value_change(lambda e: _geo_vis()); lon_i.on_value_change(lambda e: _geo_vis()); lat_i.on_value_change(lambda e: _geo_vis()); _geo_vis()
             b = m.get("bathymetry", 50); b = 50.0 if isinstance(b, (str, list)) else b; kind0 = b.get("kind", "flat") if isinstance(b, dict) else "flat"
+            from ..mesh.analytic import BOTTOMS, bottom_example
+            _lg = S().get("lang", "es")
             with ui.row().classes("row wrap q-col-gutter-sm items-center"):
-                _kinds = ["flat", "slope", "step", "channel", "shelf", "seamount", "expression"]
+                _kinds = {k_: v_[_lg if _lg in ("es", "en") else "es"] for k_, v_ in BOTTOMS.items()}
                 kind = ui.select(_kinds, value=safe_select(_kinds, kind0, "flat", label=t["depth"]), label=t["depth"]).classes("sl-w-md")
                 h = ui.number(t["depth_h"], value=float(b if not isinstance(b, dict) else b.get("h", 50)))
-                params = ui.input(t["bathy_params"], value=json.dumps({k: v for k, v in (b.items() if isinstance(b, dict) else []) if k not in ("kind", "formula")}))
+                params = ui.input(t["bathy_params"], value=json.dumps({k: v for k, v in (b.items() if isinstance(b, dict) else []) if k not in ("kind", "formula")})).style("min-width:min(520px, 100%)")
                 formula = ui.input(t["bathy_formula"], value=str((b.get("formula", "") if isinstance(b, dict) else "")), placeholder="100 - 80*exp(-((x-150e3)**2 + (y-60e3)**2)/(2*20e3**2))").classes("sl-w-lg")
-                def _bvis(): h.set_visibility(kind.value == "flat"); params.set_visibility(kind.value not in ("flat", "expression")); formula.set_visibility(kind.value == "expression")
-                kind.on_value_change(lambda e: _bvis()); _bvis()
+            bdoc = ui.markdown().classes("text-caption sl-bottom-doc").mark("bottom_doc")
+            def _domain():
+                """Extensión del dominio en las coordenadas de la malla (m desde la esquina SW, o grados en lon/lat)."""
+                try:
+                    if geo.value:
+                        lo = [float(v) for v in lon_i.value.split(",")]; la = [float(v) for v in lat_i.value.split(",")]
+                        return lo[0], lo[1], la[0], la[1]
+                    return 0.0, float(Lx.value), 0.0, float(Ly.value)
+                except (ValueError, IndexError, TypeError):
+                    return 0.0, 100e3, 0.0, 100e3
+            def _bdoc():
+                k_ = kind.value; d_ = BOTTOMS.get(k_, BOTTOMS["flat"]); i_ = 0 if _lg == "es" else 1
+                units = t["bottom_units_geo"] if geo.value else t["bottom_units_m"]
+                parts = [f"**{d_[_lg if _lg in ('es', 'en') else 'es']}**: `depth = {d_['formula']}` ({units})"]
+                if d_["params"]:
+                    parts.append("\n".join(f"- `{p_}`: {txt[i_]}" for p_, txt in d_["params"].items()))
+                if k_ not in ("flat", "expression"):
+                    parts.append(t["bottom_example"] + " `" + json.dumps(bottom_example(k_, *_domain())) + "`")
+                if k_ == "expression":
+                    parts.append(t["bottom_expr_help"])
+                bdoc.set_content("\n\n".join(parts))
+            def _bvis(): h.set_visibility(kind.value == "flat"); params.set_visibility(kind.value not in ("flat", "expression")); formula.set_visibility(kind.value == "expression"); _bdoc()
+            def _on_kind(e):
+                if e.value not in ("flat", "expression"):          # parámetros de ejemplo del fondo nuevo, ajustados al dominio
+                    params.set_value(json.dumps(bottom_example(e.value, *_domain())))
+                _bvis()
+            kind.on_value_change(_on_kind); _bvis()
+            for _w in (geo, lon_i, lat_i, Lx, Ly):                  # el ejemplo sigue al tamaño del dominio
+                _w.on_value_change(lambda e: _bdoc())
             with ui.row().classes("row wrap q-col-gutter-sm items-center"):
                 ui.label(t["open_sides"]).classes("text-subtitle2")
                 _open = [str(s_).upper() for s_ in (m.get("open_sides") or [])]; _st = {str(k_).upper(): v_ for k_, v_ in (m.get("side_types") or {}).items()}

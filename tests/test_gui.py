@@ -8,6 +8,8 @@ from nicegui.testing import User
 pytest_plugins = ["nicegui.testing.user_plugin"]
 REPO = Path(__file__).resolve().parents[1]
 CASE = REPO / "cases" / "tests" / "prueba_2d.yaml"
+from schismlab.edition import is_pro as _is_pro
+requires_pro = pytest.mark.skipif(not _is_pro(), reason="necesita SCHISMlab Pro")
 
 
 @pytest.mark.parametrize("path", ["/", "/install", "/mesh", "/model", "/forcing", "/outputs", "/update", "/params", "/run", "/results", "/results?tab=validate", "/analyse", "/validate", "/impacts"])
@@ -284,3 +286,47 @@ async def test_particles_tab_own_controls_and_animated_field(user: User, tmp_pat
     await asyncio.sleep(0.1)
     assert any(n == "restyle" and "z" in a[0] for n, a in calls)                 # el campo cambia con el fotograma
     assert any(n == "restyle" and a[1] == [1, 3] for n, a in calls)              # trayectorias y partículas
+
+
+def test_bottom_examples_are_valid_and_documented():
+    """Cada fondo idealizado tiene fórmula, parámetros explicados y un ejemplo que da profundidades positivas en el dominio."""
+    import inspect
+    import numpy as np
+    from schismlab.mesh.analytic import BOTTOMS, bottom_example, analytic_depth
+    src = inspect.getsource(analytic_depth)
+    X, Y = np.meshgrid(np.linspace(0, 100e3, 21), np.linspace(0, 50e3, 11))
+    for k, d in BOTTOMS.items():
+        if k == "expression":
+            continue
+        ex = bottom_example(k, 0, 100e3, 0, 50e3)
+        assert set(ex) <= set(d["params"]) and all(f'"{p}"' in src for p in d["params"]), k
+        z = analytic_depth(k, **ex)(X, Y)
+        assert np.all(np.isfinite(z)) and z.min() > 0, k
+    sm = analytic_depth("seamount", **bottom_example("seamount", 0, 100e3, 0, 50e3))(np.array([50e3]), np.array([25e3]))
+    assert sm[0] == pytest.approx(200.0)                                   # cima en el centro: h - A
+
+
+async def test_mesh_page_bottom_parameters_explained(user: User, tmp_path):
+    import asyncio, json
+    import yaml
+    from nicegui import ui
+    cfg = {"name": "fondo", "mesh": {"generator": "idealized", "Lx": 80000, "Ly": 40000, "dx": 4000, "bathymetry": 50, "open_sides": []}}
+    p = tmp_path / "fondo.yaml"; p.write_text(yaml.safe_dump(cfg))
+    await user.open(f"/mesh?case={p}")
+    kind = next(e for e in user.find(ui.select).elements if e._props.get("label") == "Fondo")
+    kind.set_value("seamount"); await asyncio.sleep(0.1)
+    params = next(e for e in user.find(ui.input).elements if e._props.get("label", "") == "parámetros (JSON)")
+    assert json.loads(params.value) == {"h": 1000.0, "A": 800.0, "x0": 40000.0, "y0": 20000.0, "r": 8000.0}
+    doc = next(iter(user.find(marker="bottom_doc").elements)).content
+    assert "monte submarino" in doc and "`A`" in doc and "`r`" in doc and "esquina SW" in doc
+
+
+@requires_pro
+async def test_mesh_page_opens_with_dict_bottom(user: User, tmp_path):
+    """En Pro, un caso idealizado con fondo {kind: seamount, ...} abre la página de malla (antes: error 500)."""
+    import yaml
+    cfg = {"name": "sm", "mesh": {"generator": "idealized", "Lx": 100000, "Ly": 60000, "dx": 5000, "open_sides": [],
+                                  "bathymetry": {"kind": "seamount", "h": 1000, "A": 800, "x0": 50000, "y0": 30000, "r": 10000}}}
+    p = tmp_path / "sm.yaml"; p.write_text(yaml.safe_dump(cfg))
+    await user.open(f"/mesh?case={p}")
+    await user.should_see("monte submarino")
