@@ -252,3 +252,35 @@ async def test_results_play_button_restore_stations_and_tabs(user: User, tmp_pat
     tsl.set_value(3); tsl.set_value(4)
     await asyncio.sleep(0.1)
     assert "tab_points" in str(panels.value)
+
+
+async def test_particles_tab_own_controls_and_animated_field(user: User, tmp_path, monkeypatch):
+    """Partículas: variable y capa propias, un solo mapa, y al avanzar el tiempo cambian a la vez el campo y las partículas."""
+    import asyncio
+    from nicegui import ui
+    from schismlab.gui import state
+    from test_explorer import make_case
+    monkeypatch.setattr(state, "USER_CASES", tmp_path / "cases")
+    p = make_case(tmp_path / "cases")
+    await user.open(f"/results?case={p}&tab=particles")
+    await user.should_see("Campo de fondo")
+    var = next(iter(user.find(marker="p_var").elements)); lay = next(iter(user.find(marker="p_layer").elements))
+    plot = next(iter(user.find(marker="p_plot").elements))
+    assert plot.figure["data"][0]["type"] == "heatmap"
+    v2 = [o for o in var.options if o != var.value][0]
+    var.set_value(v2); lay.set_value(0)
+    await asyncio.sleep(0.2)
+    assert v2 in plot.figure["layout"]["title"]["text"]
+    rb = next(iter(user.find(marker="p_release").elements))
+    next(h.handler for h in rb._event_listeners.values() if h.type == "click")(None)
+    for _ in range(100):
+        await asyncio.sleep(0.1)
+        if len(plot.figure["data"]) >= 4:
+            break
+    assert [d["type"] for d in plot.figure["data"]][:4] == ["heatmap", "scatter", "scatter", "scatter"]
+    calls = []
+    monkeypatch.setattr(type(plot), "run_plot_method", lambda self, name, *a, **k: calls.append((name, a)))
+    tsl = next(iter(user.find(marker="p_time").elements)); tsl.set_value(2)
+    await asyncio.sleep(0.1)
+    assert any(n == "restyle" and "z" in a[0] for n, a in calls)                 # el campo cambia con el fotograma
+    assert any(n == "restyle" and a[1] == [1, 3] for n, a in calls)              # trayectorias y partículas

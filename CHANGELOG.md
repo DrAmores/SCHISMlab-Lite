@@ -3,6 +3,15 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.5.5 (2026-10-22) — Resultados: pestaña Partículas renovada
+
+- Controles en una columna a la izquierda: **variable y capa del campo de fondo** propias (ya no hay que ir a Mapas y
+  series), **instante de suelta**, centro (o clic en el mapa), número, radio, duración y velocidad.
+- Un solo mapa grande con el campo, la zona de suelta, las trayectorias y las partículas, con play/pausa y barra de
+  tiempo como en Mapas y series. **El campo de fondo se anima junto con las partículas** (antes desaparecía o se quedaba
+  quieto).
+- Distancia media y máxima recorrida, y descarga de las trayectorias en CSV.
+
 ## 0.5.4 (2026-10-22) — Resultados: escalas de espectros y wavelets
 
 - Espectro, espectro rotatorio y wavelet ajustan sus ejes a los periodos y potencias de los datos. Antes las etiquetas

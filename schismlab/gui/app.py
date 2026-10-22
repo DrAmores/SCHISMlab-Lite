@@ -3176,40 +3176,8 @@ def _results_content(tab_key: str):
             else:
                 ui.label(t["no_other_runs"]).classes("text-grey-7")
         with rpanels, ui.tab_panel(rtab["particles"]):
-            from .figures import particles_figure, particles_animation, themed
-            _dark = bool(S().get("dark"))
-            from ..analysis.particles import track as track_particles, release_points, is_geographic
-            ui.label(t["particles_hint"]).classes("text-caption text-grey-7")
-            with ui.row().classes("row wrap q-col-gutter-sm items-center"):
-                px0 = ui.number("lon0 / x0", value=round(float(ds.x.mean()), 3), format="%.3f").props("dense").classes("sl-w-sm")
-                py0 = ui.number("lat0 / y0", value=round(float(ds.y.mean()), 3), format="%.3f").props("dense").classes("sl-w-sm")
-                npart = ui.number(t["n_particles"], value=100, min=1, max=5000).props("dense").classes("sl-w-sm")
-                prad = ui.number(t["radius_km"], value=10.0, min=0).props("dense").classes("sl-w-sm")
-                phours = ui.number(t["duration_h"], value=min(48.0, float((ds.time.values[-1] - ds.time.values[0]) / np.timedelta64(1, "h"))), min=0.1).props("dense").classes("sl-w-sm")
-                pvel = ui.select({"avg": t["vel_avg"], "layer": t["vel_layer"]}, value="avg", label=t["vel_source"]).props("dense").classes("sl-w-md")
-                pvel.set_visibility("horizontalVelX" in ds)
-            pcol = ui.column().classes("w-full"); ptracks = {}
-            def set_center(e):
-                pts = e.args.get("points", [])
-                if pts:
-                    px0.set_value(round(float(pts[0]["x"]), 3)); py0.set_value(round(float(pts[0]["y"]), 3))
-            from .explorer import CLICK_JS
-            est.plot.on("plotly_click", set_center, js_handler=CLICK_JS)
-            async def release():
-                pcol.clear()
-                def go():
-                    x, y = release_points(float(px0.value), float(py0.value), int(npart.value), float(prad.value), is_geographic(ds))
-                    start = state["it"] if state["it"] < ds.time.size - 1 else 0        # desde el instante del mapa (o desde el principio si es el último)
-                    return track_particles(ds, x, y, start=start, hours=float(phours.value), layer=state["layer"] if pvel.value == "layer" else None)
-                tr = await run.io_bound(go); ptracks["tr"] = tr
-                with pcol:
-                    ui.label(f"{t['mean_dist']}: {np.nanmean(tr.distance_km()):.1f} km").classes("text-subtitle2")
-                    ui.plotly(themed(particles_figure(ds, state["var"], state["it"], state["layer"], tr), _dark)).classes("w-full").style("height:600px")
-                    ui.plotly(themed(particles_animation(ds, state["var"], state["layer"], tr), _dark)).classes("w-full").style("height:600px")
-                    def dl():
-                        p = wd / "particulas.csv"; tr.to_csv(p); ui.download(p)
-                    ui.button(t["download_csv"], icon="download", on_click=dl).props("flat")
-            ui.button(t["release"], icon="scatter_plot", on_click=release).props("color=secondary")
+            from .particles_tab import particles_tab
+            particles_tab(ds, c, wd, t, S().get("lang", "es"), est, dark=bool(S().get("dark")))
 # ----------------------------------------------------------------------------- validar
 
 # ----------------------------------------------------------------------------- impactos de la inundacion
