@@ -3,6 +3,11 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.5.2 (2026-10-22) — Resultados: el instante del mapa en las series
+
+- Puntos: en las series temporales, un punto en cada curva y una línea vertical marcan el instante que muestra el mapa,
+  y se mueven al arrastrar el tiempo o al reproducir la película (sin redibujar las series).
+
 ## 0.5.1 (2026-10-22) — Resultados: reproducción y puntos
 
 - El icono del botón de reproducción (play/pausa) del mapa queda centrado.

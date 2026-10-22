@@ -209,6 +209,12 @@ def test_explorer_iso_mode():
     d = map_figure(st, TEXT["es"], "es"); assert "15" in str(d["layout"]["title"]) and d["data"][0]["type"] == "heatmap"
     st.add_point(20e3, 10e3)
     f = series_figure_multi(st, "temperature", "es"); assert np.allclose(f.data[0].y, [50, 40, 30]) and f.layout.yaxis.autorange == "reversed"
+    # marcador del instante del mapa en la serie, y su desplazamiento con el tiempo
+    from schismlab.gui.explorer import series_cursor
+    assert f.data[1].mode == "markers" and f.data[1].y[0] == pytest.approx(40.0) and len(f.layout.shapes) == 1
+    st.it = 2; xs, ys, tc = series_cursor(st)
+    assert ys == [pytest.approx(30.0)] and xs[0].startswith("2020-01-01T02:00") and tc.startswith("2020-01-01T02:00")
+    st.it = 1
     s = st.add_section((2e3, 10e3), (38e3, 10e3))
     fig = section_figure2(s["sec"], "temperature", 1, arrows=False, iso=("temperature", 15.0))
     assert np.allclose(fig.data[-1].y, -40.0)                          # línea de la isoterma en la sección

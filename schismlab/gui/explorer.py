@@ -223,28 +223,53 @@ def station_series(wd: Path, var: str, name: str):
 
 
 def series_figure_multi(st: ExplorerState, var: str, lang: str, wd: Path | None = None) -> go.Figure:
-    fig = go.Figure(); used_sta = False
+    """Series de los puntos con un marcador en el instante del mapa (st.it) y una línea vertical; `series_cursor`
+    los mueve sin redibujar las series."""
+    fig = go.Figure(); used_sta = False; lines = []
     if st.iso_ok(var):                                     # profundidad de la isosuperficie en cada punto
         from ..analysis.isosurface import isosurface_series
         for p in st.points:
             y = isosurface_series(st.ds, var, st.iso_value, p["node"], st.vg)
             fig.add_trace(go.Scatter(x=st.ds.time.values, y=y, mode="lines", name=p["name"], line=dict(color=p["color"], width=2)))
+            lines.append((np.asarray(st.ds.time.values), np.asarray(y, float), p["color"]))
         fig.update_layout(yaxis=dict(title=st.iso_label(lang), autorange="reversed"), hovermode="x unified", **layout(st.dark))
-        return fig
-    for p in st.points:
-        sta = station_series(wd, var, p["name"]) if p.get("station") else None
-        if sta is not None:
-            t_, y = sta; used_sta = True
-            fig.add_trace(go.Scatter(x=t_, y=y, mode="lines", name=f"{p['name']} (staout)", line=dict(color=p["color"], width=1.5)))
-            continue
-        s = point_series(st.ds, var, p["node"], st.layer)
-        y = np.hypot(s["u"], s["v"]) if "u" in s else s["y"]
-        fig.add_trace(go.Scatter(x=s["t"], y=y, mode="lines", name=p["name"], line=dict(color=p["color"], width=2)))
-    fig.update_layout(yaxis_title=label(var, lang), hovermode="x unified", **layout(st.dark))
-    if used_sta:
-        fig.add_annotation(x=0.01, y=0.98, xref="paper", yref="paper", showarrow=False, xanchor="left", font=dict(size=10, color="#555"),
-                           text="estaciones: serie fina de staout (en superficie)" if lang == "es" else "stations: fine staout series (surface)")
+    else:
+        for p in st.points:
+            sta = station_series(wd, var, p["name"]) if p.get("station") else None
+            if sta is not None:
+                t_, y = sta; used_sta = True
+                fig.add_trace(go.Scatter(x=t_, y=y, mode="lines", name=f"{p['name']} (staout)", line=dict(color=p["color"], width=1.5)))
+                lines.append((np.asarray(t_), np.asarray(y, float), p["color"]))
+                continue
+            s = point_series(st.ds, var, p["node"], st.layer)
+            y = np.hypot(s["u"], s["v"]) if "u" in s else s["y"]
+            fig.add_trace(go.Scatter(x=s["t"], y=y, mode="lines", name=p["name"], line=dict(color=p["color"], width=2)))
+            lines.append((np.asarray(s["t"]), np.asarray(y, float), p["color"]))
+        fig.update_layout(yaxis_title=label(var, lang), hovermode="x unified", **layout(st.dark))
+        if used_sta:
+            fig.add_annotation(x=0.01, y=0.98, xref="paper", yref="paper", showarrow=False, xanchor="left", font=dict(size=10, color="#555"),
+                               text="estaciones: serie fina de staout (en superficie)" if lang == "es" else "stations: fine staout series (surface)")
+    st.series_lines = lines
+    xs, ys, tc = series_cursor(st)
+    for (_, _, col), x_, y_ in zip(lines, xs, ys):        # marcador del instante actual en cada serie
+        fig.add_trace(go.Scatter(x=[x_], y=[y_], mode="markers", showlegend=False, hoverinfo="skip",
+                                 marker=dict(color=col, size=11, line=dict(color="white", width=2))))
+    if lines:
+        fig.add_shape(type="line", xref="x", yref="paper", x0=tc, x1=tc, y0=0, y1=1, line=dict(color="#888", width=1, dash="dot"))
     return fig
+
+
+def series_cursor(st: ExplorerState):
+    """(x, y de cada marcador, instante) en st.it: el valor de cada serie más próximo al instante del mapa."""
+    tc = np.asarray(st.ds.time.values)[st.it]
+    xs, ys = [], []
+    for t_, y, _ in getattr(st, "series_lines", []):
+        if t_.size == 0:
+            xs.append(None); ys.append(None); continue
+        k = int(np.argmin(np.abs(t_.astype("datetime64[s]").astype("int64") - np.datetime64(tc, "s").astype("int64"))))
+        xs.append(np.datetime_as_string(np.datetime64(t_[k], "s"))); v = y[k]
+        ys.append(float(v) if np.isfinite(v) else None)
+    return xs, ys, np.datetime_as_string(np.datetime64(tc, "s"))
 
 
 def animation_figure2(st: ExplorerState, t: dict, lang: str, step: int = 1, progress=None) -> go.Figure:
@@ -480,8 +505,24 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         else:
             hovfig.update_figure(hovmoller_figure(st.sections[i]["sec"], svar.value, st.layer, lang, dark=st.dark))
         hovfig.set_visibility(True)
+    def move_cursor():
+        """Mueve los marcadores y la línea del instante en las series (restyle/relayout, sin redibujar)."""
+        n = len(getattr(st, "series_lines", []))
+        if not n:
+            return
+        xs, ys, tc = series_cursor(st)
+        try:
+            data = sfig.figure["data"]
+            for k in range(n):
+                data[n + k]["x"] = [xs[k]]; data[n + k]["y"] = [ys[k]]
+            if sfig.figure["layout"].get("shapes"):
+                sfig.figure["layout"]["shapes"][0].update(x0=tc, x1=tc)
+            sfig.run_plot_method("restyle", {"x": [[x_] for x_ in xs], "y": [[y_] for y_ in ys]}, list(range(n, 2 * n)))
+            sfig.run_plot_method("relayout", {"shapes[0].x0": tc, "shapes[0].x1": tc})
+        except Exception:   # noqa: BLE001  (figura cambiada mientras tanto: se redibuja)
+            sfig.update_figure(series_figure_multi(st, st.var, lang, wd))
     def on_time(e):
-        st.it = int(e.value); refresh_time_label(); refresh_map_time()
+        st.it = int(e.value); refresh_time_label(); refresh_map_time(); move_cursor()
         if state_sec["active"] is not None and in_sections():     # la sección sigue al tiempo solo si se está viendo
             show_section(state_sec["active"], switch=False)
     def refresh_range():
