@@ -1001,6 +1001,7 @@ def page_mesh():
                             inu_size = ui.number(t["inu_size"], value=float(inu0.get("size", 50)), min=1, step=5).props("dense").classes("sl-w-md")
                             inu_tr = ui.number(t["transition"], value=float(inu0.get("transition_km", 1.0)), min=0, step=0.5).props("dense").classes("sl-w-sm")
                             inu_ct = ui.number(t["inu_contours"], value=float(inu0.get("contours", 1.0)), min=0, step=0.5).props("dense").classes("sl-w-md")
+                            inu_lo = ui.switch(t["inu_land_only"], value=bool(inu0.get("land_only", False))).props("dense")
                         with ui.row().classes("row wrap q-col-gutter-sm items-center"):
                             from ..edition import pro as _pro
                             _pro_data_dem = _pro("data.dem")
@@ -1361,6 +1362,8 @@ def page_mesh():
                     mm["inundation"] = {"region": inu_region.value or None, "max_elevation": float(inu_elev.value),
                                         "dem": (inu_file.value or "").strip() or inu_dem.value, "size": float(inu_size.value), "transition_km": float(inu_tr.value),
                                         "contours": float(inu_ct.value or 0)}
+                    if inu_lo.value:
+                        mm["inundation"]["land_only"] = True
                     if urb_on.value:
                         mm["inundation"]["urban"] = {"buildings": urb_bld.value, "building_height": float(urb_h.value or 0),
                                                      "streets": urb_streets.value, "curb_m": float(urb_curb.value or 0), "size": float(urb_size.value or 4),
@@ -2876,6 +2879,21 @@ def page_run():
                             def go():
                                 cl = Cluster(user.value); cl.connect(); return cl.cancel((wd / "jobid").read_text().strip())
                             await run_job(go, log, on_done=lambda s_: ui.notify(f"{t['stopped']}: {s_}", type="warning"))
+                        smem = ui.input(t["setup_mem"], value="64G").props("dense").classes("sl-w-sm")
+                        async def setup_cluster():
+                            S().update(cluster_user=user.value); Cluster = _pro("cluster").Cluster
+                            cp = case_path(); u_now = user.value
+                            def go():
+                                cl = Cluster(u_now); cl.connect()
+                                job = cl.setup(cp, mem=(smem.value or "64G").strip(), partition=part.value, node=node.value or None)
+                                cl.wait(job)
+                                r = cl.fetch_setup(wd)
+                                if not r["ok"]:
+                                    raise RuntimeError(f"{r['state']}: {r['reason']}")
+                                return r["state"]
+                            log.clear()
+                            await run_job(go, log, on_done=lambda s_: ui.notify(t["setup_fetched"], type="positive"), key=jkey + ":setup_cluster")
+                        ui.button(t["setup_cluster"], icon="cloud_sync", on_click=setup_cluster).props("outline").tooltip(t["setup_cluster_hint"])
                         ui.button(t["run_cluster"], icon="cloud_upload", on_click=submit).props("color=secondary")
                         ui.button(t["wait_fetch"], icon="cloud_download", on_click=wait).props("outline")
                         cancel_btn = ui.button(t["stop_cluster"], icon="cancel", on_click=cancel).props("color=negative")

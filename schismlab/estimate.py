@@ -11,7 +11,8 @@ CLUSTER veces uno de la máquina de referencia. La dispersión de las ejecucione
 factor 1.5 (p10–p90: 0.6–1.6), así que se da un rango y no un número.
 
 Cada ordenador se recalibra solo: `record_run` guarda en ~/.schismlab/perf.jsonl el tiempo real de cada simulación
-local de más de un minuto, y `machine_factor` usa la mediana del cociente real/modelo de las últimas ejecuciones.
+local de más de un minuto, y `machine_factor` usa la mediana del cociente real/modelo de las últimas ejecuciones. Las
+simulaciones del clúster se guardan aparte (machine = cluster) y calibran solo la estimación del clúster.
 """
 from __future__ import annotations
 import json
@@ -58,15 +59,16 @@ def work_units(nodes: int, steps: int, nvrt: int = 2, waves: dict | None = None)
     return float(w)
 
 
-def machine_factor(n_last: int = 10) -> tuple[float, int]:
-    """(factor real/modelo de este ordenador, número de ejecuciones usadas). 1.0 si aún no hay datos."""
+def machine_factor(n_last: int = 10, cluster: bool = False) -> tuple[float, int]:
+    """(factor real/modelo de este ordenador o del clúster, número de ejecuciones usadas). 1.0 si aún no hay datos."""
     if not PERF.exists():
         return 1.0, 0
     ratios = []
-    for line in PERF.read_text().splitlines()[-n_last:]:
+    lines = [l for l in PERF.read_text().splitlines() if ('"machine": "cluster"' in l) == cluster]
+    for line in lines[-n_last:]:
         try:
             r = json.loads(line)
-            pred = work_units(r["nodes"], r["steps"], r["nvrt"], r.get("waves")) / effective_cores(r["nprocs"]) + T0
+            pred = work_units(r["nodes"], r["steps"], r["nvrt"], r.get("waves")) / effective_cores(r["nprocs"], cluster) + T0
             ratios.append(r["seconds"] / pred)
         except Exception:   # noqa: BLE001
             continue
@@ -93,7 +95,7 @@ def estimate(cfg: dict, nodes: int, nprocs: int | None = None, cluster: bool = F
     """Rango de tiempo de pared (s) para el caso con `nodes` nodos en `nprocs` procesos (local o clúster)."""
     p = case_params(cfg)
     nprocs = int(nprocs or (128 if cluster else default_local_cores()))
-    f, n = (1.0, 0) if cluster else machine_factor()
+    f, n = machine_factor(cluster=cluster)
     t = (work_units(nodes, p["steps"], p["nvrt"], p["waves"]) / effective_cores(nprocs, cluster) + T0) * f
     return dict(seconds=t, low=t * LOW, high=t * HIGH, nprocs=nprocs, calibrated_runs=n, factor=f, **p)
 
@@ -112,8 +114,8 @@ def fmt_range(e: dict, lang: str = "es") -> str:
     return f"{fmt_duration(e['low'], lang)} – {fmt_duration(e['high'], lang)}"
 
 
-def record_run(rundir: Path, seconds: float, nprocs: int) -> None:
-    """Guarda el tiempo real de una simulación local (>= 60 s) para recalibrar este ordenador."""
+def record_run(rundir: Path, seconds: float, nprocs: int, machine: str = "local") -> None:
+    """Guarda el tiempo real de una simulación (>= 60 s) para recalibrar este ordenador (o el clúster: machine='cluster')."""
     rundir = Path(rundir)
     if seconds < 60:
         return
@@ -131,6 +133,7 @@ def record_run(rundir: Path, seconds: float, nprocs: int) -> None:
         PERF.parent.mkdir(parents=True, exist_ok=True)
         with PERF.open("a") as f:
             f.write(json.dumps(dict(when=time.strftime("%Y-%m-%d %H:%M"), case=rundir.name, nodes=nodes, steps=steps, nvrt=nvrt,
-                                    waves=waves, nprocs=int(nprocs), seconds=round(seconds, 1))) + "\n")
+                                    waves=waves, nprocs=int(nprocs), seconds=round(seconds, 1),
+                                    **({"machine": "cluster"} if machine == "cluster" else {}))) + "\n")
     except Exception:   # noqa: BLE001  (la calibración nunca debe romper una simulación)
         pass

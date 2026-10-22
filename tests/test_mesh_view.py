@@ -36,6 +36,20 @@ def test_estimate_matches_reference_runs():
         E.physical_cores = old
 
 
+
+def test_cluster_estimate_calibrates_separately(tmp_path, monkeypatch):
+    """Las simulaciones del clúster calibran solo la estimación del clúster, y las locales solo la local."""
+    import json
+    import schismlab.estimate as E
+    monkeypatch.setattr(E, "PERF", tmp_path / "perf.jsonl")
+    cfg = {"time": {"days": 1, "dt": 60}, "vertical": {"type": "2d"}}
+    base_c = E.estimate(cfg, 100000, 200, cluster=True)["seconds"]
+    pred = E.work_units(100000, 1440, 2) / E.effective_cores(200, True) + E.T0
+    with E.PERF.open("w") as f:
+        f.write(json.dumps(dict(nodes=100000, steps=1440, nvrt=2, waves=None, nprocs=200, seconds=5 * pred, machine="cluster")) + "\n")
+    assert E.machine_factor(cluster=True) == (pytest.approx(5.0), 1) and E.machine_factor() == (1.0, 0)
+    assert E.estimate(cfg, 100000, 200, cluster=True)["seconds"] == pytest.approx(5 * base_c)
+
 def _mesh(tmp_path: Path, geographic=True) -> Path:
     m = rectangular_basin(Lx=20000, Ly=10000, dx=1000, depth=50.0)
     if geographic:

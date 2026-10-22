@@ -53,7 +53,14 @@ echo ">> modulos: ${MODULE_FLAGS[*]:-ninguno}"
 
 # 3. Configurar y compilar -------------------------------------------------------
 FFLAGS="-O2 -ffree-line-length-none -fallow-argument-mismatch -finit-local-zero"
+# un directorio de compilacion de otro entorno pixi (p. ej. tras cambiar pixi.lock) guarda en CMakeCache rutas a
+# compiladores que ya no existen y CMake reconfigura sin modulos ("No rule to make target pschism"): se empieza de cero
+if [[ -f "$BUILD/CMakeCache.txt" && "$(cat "$BUILD/.conda_prefix" 2>/dev/null)" != "$CONDA_PREFIX" ]]; then
+  echo ">> directorio de compilacion de otro entorno: se borra $BUILD"
+  rm -rf "$BUILD"
+fi
 mkdir -p "$BUILD"
+echo "$CONDA_PREFIX" > "$BUILD/.conda_prefix"
 cd "$BUILD"   # el CMake de ParMETIS crea un enlace "metis" en el directorio actual
 cmake -S "$SRC/src" -B "$BUILD" \
   -DCMAKE_BUILD_TYPE=Release \
