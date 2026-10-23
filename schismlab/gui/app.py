@@ -1976,7 +1976,7 @@ def page_forcing():
         if not has_open:
             ui.label(t["no_open_boundaries"]).classes("q-pa-sm rounded-borders text-body2 " + ("bg-orange-10" if S().get("dark") else "bg-orange-1 text-orange-10"))
         PRO = is_pro()
-        exp_keys = ["atm", "tides", "meteo", "bc3d", "waves", "rivers"] if PRO else ["atm", "tides"]   # meteotsunami, 3D, oleaje y ríos: Pro
+        exp_keys = ["atm", "tides", "meteo", "quake", "bc3d", "waves", "rivers"] if PRO else ["atm", "tides"]   # meteotsunami, tsunami, 3D, oleaje y ríos: Pro
         _pg = None
         if PRO:
             from ..edition import pro as _pro
@@ -1992,7 +1992,7 @@ def page_forcing():
         if want_tab not in exp_keys:
             want_tab = "atm"
         lang_ = S().get("lang", "es")
-        _icons = {"atm": "air", "tides": "waves", "meteo": "speed", "bc3d": "public", "waves": "tsunami", "rivers": "water"}
+        _icons = {"atm": "air", "tides": "waves", "meteo": "speed", "quake": "landslide", "bc3d": "public", "waves": "tsunami", "rivers": "water"}
         exp = {k: ui.expansion(t["tab_" + k], icon=_icons[k], value=(k == want_tab)).classes("sl-exp w-full") for k in exp_keys}
         with exp["atm"]:
             with ui.column().classes("w-full"):
@@ -2099,6 +2099,9 @@ def page_forcing():
         if PRO:                                             # meteotsunami, contornos 3D, oleaje y ríos: SCHISMlab Pro
             with exp["meteo"]:
                 pd_collect = _pg.pressure_box(t, fc, set_caption, exp["meteo"], geographic=is_geographic_cfg(c))
+            with exp["quake"]:
+                bd_collect = _pg.bed_deformation_box(t, fc, set_caption, exp["quake"], geographic=is_geographic_cfg(c),
+                                                     mesh_info=lambda: (workdir(), is_geographic_cfg(cfg())))
             with exp["bc3d"]:
                 with ui.column().classes("w-full"):
                     pass
@@ -2186,7 +2189,7 @@ def page_forcing():
             elif wk.value == "era5":
                 f2["atmosphere"] = {"source": "era5", "heat": bool(heat.value), "precipitation": bool(precip.value)}
             if PRO:
-                atm_file_collect(f2, heat, precip); pd_collect(f2); rain_collect(f2, _parse_value)
+                atm_file_collect(f2, heat, precip); pd_collect(f2); bd_collect(f2); rain_collect(f2, _parse_value)
             if PRO and rivers:
                 f2["rivers"] = [dict(r) for r in rivers]
             c2["forcing"] = f2

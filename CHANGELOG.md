@@ -3,6 +3,10 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.6.0 (2026-10-23)
+
+- Sin cambios en SCHISMlab Lite (versión a la par con SCHISMlab Pro, que añade los tsunamis por deformación del fondo).
+
 ## 0.5.10 (2026-10-23) — Partículas: batimetría de fondo y barra de tiempo fluida
 
 - Partículas: el fondo del mapa puede ser la variable o la **profundidad**, y se pueden dibujar las **isobatas** encima,

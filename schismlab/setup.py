@@ -517,6 +517,13 @@ class RunSetup:
             write_param(self.dir / name, self._nml_overrides(name), template=template_path(name))
             log.info("%s escrito (modulo adicional)", name)
 
+    def bed_deformation(self):
+        """Tsunami por deformación del fondo (SCHISMlab Pro): forcing.bed_deformation -> bdef.gr3, imm = 1."""
+        bd = (self.cfg.get("forcing") or {}).get("bed_deformation")
+        if not bd:
+            return
+        pro("forcing.bed_deformation", "deformación del fondo (tsunami) / bed deformation (tsunami)").write(self, bd)
+
     def waves(self):
         """Oleaje (WWM): `waves: {enabled: true, nstep: 3, msc: 24, mdc: 24, boundary_hs: null, variables: [...]}`."""
         wc = self.cfg.get("waves") or {}
@@ -533,7 +540,7 @@ class RunSetup:
         from .checks import require_lite_compatible
         require_lite_compatible(self.cfg)                      # SCHISMlab Lite: casos sin funciones de Pro
         self._extra_scribes = 0
-        self.mesh(); self.vertical(); self.time_and_physics(); self.initial(); self.forcing(); self.boundaries(); self.waves(); self.outputs()
+        self.mesh(); self.vertical(); self.time_and_physics(); self.initial(); self.forcing(); self.boundaries(); self.waves(); self.bed_deformation(); self.outputs()
         self.extra_namelists()
         (self.dir / "variant").write_text(self.variant + "\n")
         (self.dir / "modules").write_text(" ".join(self.modules) + "\n")   # para compilar la misma variante en el cluster

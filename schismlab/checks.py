@@ -8,6 +8,7 @@ _NAMES = {
     "inundation": ("inundación", "flooding"),
     "era5": ("atmósfera real (ERA5 o ficheros propios)", "real atmosphere (ERA5 or own files)"),
     "pressure": ("perturbación de presión (meteotsunami)", "pressure disturbance (meteotsunami)"),
+    "bed_deformation": ("deformación del fondo (tsunami)", "bed deformation (tsunami)"),
     "rain": ("lluvia sobre la malla", "rain over the mesh"),
     "rivers": ("ríos", "rivers"),
     "bc3d": ("contornos 3D o anidamiento", "3D boundaries or nesting"),
@@ -45,6 +46,8 @@ def pro_feature_keys(cfg: dict) -> list[str]:
         out.append("era5")
     if fc.get("pressure_disturbance"):
         out.append("pressure")
+    if fc.get("bed_deformation"):
+        out.append("bed_deformation")
     if fc.get("rivers"):
         out.append("rivers")
     if fc.get("rain"):
