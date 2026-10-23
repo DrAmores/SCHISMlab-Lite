@@ -36,7 +36,10 @@ def run_local(rundir: Path, variant: str = "hydro", ncores: int | None = None, n
     archive_outputs(rundir)                                 # la simulación anterior queda guardada (outputs_<fecha>/)
     (rundir / "outputs").mkdir(exist_ok=True)
     for f in (rundir / "outputs").glob("*"):
-        f.unlink() if f.is_file() else shutil.rmtree(f)
+        try:
+            f.unlink() if f.is_file() else shutil.rmtree(f)
+        except OSError as ex:                               # fichero bloqueado (Dropbox, disco de Windows): SCHISM lo sobrescribe
+            log.warning("no se pudo borrar %s: %s", f.name, ex)
     cmd = ["mpirun", "--oversubscribe", "-np", str(ncores + nscribes), str(exe), str(nscribes)]
     log.info("ejecutando: %s  (en %s)", " ".join(cmd), rundir)
     t0 = time.time()
@@ -155,10 +158,42 @@ def write_run_info(rundir: Path, **info) -> Path:
 _SKIP_ARCHIVE = ("outputs", "mesh_view.npz", "depth_unedited.npz", "run.pid", "run.stop")
 
 
+def _copy_file(src: Path, dst: Path) -> None:
+    """Copia solo el contenido: en discos de Windows montados en WSL (/mnt/c, /mnt/d) un usuario que no es el dueño
+    no puede cambiar permisos ni fechas, y shutil.copy2 falla con «Operation not permitted»."""
+    shutil.copyfile(src, dst)
+    try:
+        shutil.copystat(src, dst)
+    except OSError:
+        pass
+
+
+def _copy_tree(src: Path, dst: Path) -> None:
+    """Copia una carpeta solo con el contenido (sin permisos ni fechas, ver _copy_file)."""
+    for f in sorted(Path(src).rglob("*")):
+        t = Path(dst) / f.relative_to(src)
+        if f.is_dir():
+            t.mkdir(parents=True, exist_ok=True)
+        else:
+            t.parent.mkdir(parents=True, exist_ok=True); _copy_file(f, t)
+
+
+def _move_dir(src: Path, dst: Path) -> None:
+    """Mueve una carpeta: renombrar y, si el sistema no deja (Dropbox, ficheros aún abiertos, /mnt/d), copiar y borrar."""
+    try:
+        os.rename(src, dst); return
+    except OSError as ex:
+        log.info("no se pudo renombrar %s (%s): se copia", src.name, ex)
+    _copy_tree(src, dst)
+    shutil.rmtree(src, ignore_errors=True)
+
+
 def archive_outputs(rundir: Path) -> Path | None:
     """Si outputs/ tiene resultados, los mueve a outputs_<fecha de la simulación>/ junto con una copia de todas las
     entradas (malla, vgrid, param.nml, bctides, hotstart, .gr3, .th, sflux/, caso.yaml, registros): la carpeta es
-    autocontenida y permite reproducir o volver a analizar la simulación aunque el caso cambie después."""
+    autocontenida y permite reproducir o volver a analizar la simulación aunque el caso cambie después.
+
+    Nunca impide lanzar la simulación nueva: si algo no se puede archivar, se avisa y outputs/ se vacía."""
     rundir = Path(rundir); out = rundir / "outputs"
     files = list(out.glob("out2d_*.nc")) if out.exists() else []
     if not files:
@@ -168,17 +203,28 @@ def archive_outputs(rundir: Path) -> Path | None:
     k = 1
     while dst.exists():
         k += 1; dst = rundir / f"outputs_{stamp}_{k}"
-    shutil.move(str(out), str(dst))
+    problems = []
+    try:
+        _move_dir(out, dst)
+    except OSError as ex:
+        problems.append(f"outputs: {ex}")
     for f in rundir.iterdir():
-        if f.name in _SKIP_ARCHIVE or f.name.startswith("outputs_") or f.suffix in (".mp4",):
+        if f.name in _SKIP_ARCHIVE or f.name.startswith("outputs") or f.suffix in (".mp4",):
             continue
-        if f.is_dir():
-            shutil.copytree(f, dst / f.name, dirs_exist_ok=True)       # sflux/ y otros directorios de forzamiento
-        else:
-            shutil.copy2(f, dst / f.name)
+        try:
+            (_copy_tree if f.is_dir() else _copy_file)(f, dst / f.name)      # entradas: malla, sflux/, .th, param.nml...
+        except OSError as ex:
+            problems.append(f"{f.name}: {ex}")
     crop = rundir / "outputs_recorte"
     if crop.exists():
-        shutil.move(str(crop), str(dst / "recorte"))
+        try:
+            _move_dir(crop, dst / "recorte")
+        except OSError as ex:
+            problems.append(f"recorte: {ex}")
+    if problems:
+        log.warning("no se pudo archivar del todo la simulación anterior en %s (%s); se sigue con la nueva", dst.name, "; ".join(problems)[:300])
+    if out.exists():                                     # lo que no se pudo mover: fuera, para no mezclar simulaciones
+        shutil.rmtree(out, ignore_errors=True)
     log.info("simulación anterior archivada en %s", dst)
     return dst
 

@@ -3,6 +3,13 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.5.9 (2026-10-23) — Ejecutar en discos de Windows y con Dropbox
+
+- Al volver a ejecutar un caso guardado en un disco de Windows (/mnt/c, /mnt/d) o en Dropbox, archivar la simulación
+  anterior podía fallar con «Operation not permitted» (otro usuario de WSL no puede cambiar permisos ni fechas de esos
+  ficheros, y Dropbox o una simulación recién detenida impiden renombrar) y la simulación nueva no arrancaba. Ahora el
+  archivo copia solo el contenido, y si algo no se puede archivar se avisa y la simulación se lanza igualmente.
+
 ## 0.5.8 (2026-10-23) — Visor de la malla: escala de profundidad ajustada
 
 - En Dominio y malla, la capa Profundidad del visor usa el rango de profundidades de la malla (antes iba siempre de 0 al
