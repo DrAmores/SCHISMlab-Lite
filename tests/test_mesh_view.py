@@ -94,3 +94,14 @@ def test_probe_inside_outside():
     v = probe(d, 0.1, 0.1)
     assert v["element"] == 1 and v["node"] == 1 and 10 < v["depth"] < 20
     assert probe(d, 2.0, 2.0) is None
+
+
+def test_mesh_view_depth_scale_fits_the_data():
+    """La capa de profundidad usa el rango de los datos: el escalón de 200 a 199 m de la práctica 2 se distingue."""
+    from schismlab.mesh.view import _style
+    tri = np.array([[0, 1, 2], [1, 3, 2]])
+    d = {"depth": np.array([200.0, 200.0, 199.0, 199.0]), "tri": tri}
+    _, _, norm, lab = _style("depth", d)
+    assert 198.9 < norm.vmin < norm.vmax <= 200.0 and "profundidad" in lab          # antes: de 0 a 200 m
+    _, _, norm, _ = _style("depth", {"depth": np.full(4, 50.0), "tri": tri})
+    assert norm.vmax > norm.vmin

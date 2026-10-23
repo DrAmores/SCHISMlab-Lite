@@ -3,6 +3,11 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.5.8 (2026-10-23) — Visor de la malla: escala de profundidad ajustada
+
+- En Dominio y malla, la capa Profundidad del visor usa el rango de profundidades de la malla (antes iba siempre de 0 al
+  máximo): el escalón de 200 a 199 m de la práctica 2 o un monte submarino se distinguen a simple vista.
+
 ## 0.5.7 (2026-10-22) — Resultados: isolíneas, nueva disposición de Mapas y series y secciones
 
 - **Isolíneas encima del campo de color** (Estilo del mapa → Isolíneas): la profundidad o cualquier variable, con

@@ -105,7 +105,10 @@ def _style(layer: str, d: dict):
             sea = matplotlib.colormaps["Blues"](np.linspace(0.95, 0.25, 128)); terr = matplotlib.colormaps["YlOrBr"](np.linspace(0.1, 0.95, 128))
             top = max(float(np.percentile(land, 99.5)), 1.0)
             return -de, ListedColormap(np.vstack([sea, terr])), TwoSlopeNorm(vmin=-max(hi, 1.0), vcenter=0.0, vmax=top), "cota (m): mar < 0 < tierra"
-        return de, "viridis_r", Normalize(min(0.0, float(de.min())), max(hi, 1.0)), "profundidad (m)"
+        lo, hi = float(de.min()), float(np.percentile(de, 99.5))      # rango de los datos: un escalón de 1 m sobre 200 m se ve
+        if not hi > lo:
+            lo, hi = lo - 0.5, lo + 0.5                               # fondo plano
+        return de, "viridis_r", Normalize(lo, hi), "profundidad (m)"
     if layer == "quality":
         return d["minang"], "RdYlGn", Normalize(10, 60), "ángulo mínimo (°)"
     return None, None, None, ""
