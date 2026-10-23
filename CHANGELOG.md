@@ -3,6 +3,14 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.5.10 (2026-10-23) — Partículas: batimetría de fondo y barra de tiempo fluida
+
+- Partículas: el fondo del mapa puede ser la variable o la **profundidad**, y se pueden dibujar las **isobatas** encima,
+  para ver los efectos topográficos (columnas de Taylor, corrientes guiadas por el fondo).
+- Al arrastrar la barra de tiempo un trozo grande (en Partículas y en Mapas y series) solo se dibuja el último instante
+  pedido: antes cada posición intermedia mandaba un fotograma, se saturaba la conexión y la página se recargaba
+  perdiendo las partículas. Si la página se recarga igualmente, las partículas calculadas se recuperan.
+
 ## 0.5.9 (2026-10-23) — Ejecutar en discos de Windows y con Dropbox
 
 - Al volver a ejecutar un caso guardado en un disco de Windows (/mnt/c, /mnt/d) o en Dropbox, archivar la simulación

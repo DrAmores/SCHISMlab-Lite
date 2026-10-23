@@ -252,7 +252,7 @@ async def test_results_play_button_restore_stations_and_tabs(user: User, tmp_pat
     panels.set_value("tab_points")
     tsl = next(iter(user.find(marker="time_slider").elements))
     tsl.set_value(3); tsl.set_value(4)
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.4)
     assert "tab_points" in str(panels.value)
 
 
@@ -283,7 +283,7 @@ async def test_particles_tab_own_controls_and_animated_field(user: User, tmp_pat
     calls = []
     monkeypatch.setattr(type(plot), "run_plot_method", lambda self, name, *a, **k: calls.append((name, a)))
     tsl = next(iter(user.find(marker="p_time").elements)); tsl.set_value(2)
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.4)
     assert any(n == "restyle" and "z" in a[0] for n, a in calls)                 # el campo cambia con el fotograma
     assert any(n == "restyle" and a[1] == [1, 3] for n, a in calls)              # trayectorias y partículas
 
@@ -351,10 +351,10 @@ async def test_results_isolines_over_colour(user: User, tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(type(plot), "run_plot_method", lambda self, name, *a, **k: calls.append((name, a)))
     tsl = next(iter(user.find(marker="time_slider").elements)); tsl.set_value(1)
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.4)
     assert any(n == "restyle" and a[1] == [0] for n, a in calls)          # profundidad: vía rápida, solo el campo de color
     iso.set_value("elevation"); await asyncio.sleep(0.1)
-    tsl.set_value(3); await asyncio.sleep(0.1)
+    tsl.set_value(3); await asyncio.sleep(0.4)
     assert plot.figure["data"][1]["type"] == "contour" and "03:00" in plot.figure["layout"]["title"]["text"]   # redibujado con niveles nuevos
 
 
@@ -402,3 +402,35 @@ async def test_sections_visible_toggle_and_plot_button(user: User, tmp_path, mon
     next(h.handler for h in b0._event_listeners.values() if h.type == "click")(None)
     await asyncio.sleep(0.1)
     assert "primary" in next(iter(user.find(marker="sec_plot_0").elements))._props.get("color", "")
+
+
+async def test_particles_depth_background_drag_and_reload(user: User, tmp_path, monkeypatch):
+    """Partículas: batimetría de fondo e isobatas; al arrastrar la barra de tiempo solo se dibuja el último instante
+    (antes cada valor intermedio mandaba un fotograma y la página se recargaba); al recargar, las partículas siguen."""
+    import asyncio
+    from schismlab.gui import state
+    from test_explorer import make_case
+    monkeypatch.setattr(state, "USER_CASES", tmp_path / "cases")
+    p = make_case(tmp_path / "cases")
+    await user.open(f"/results?case={p}&tab=particles")
+    await user.should_see("Campo de fondo")
+    plot = next(iter(user.find(marker="p_plot").elements))
+    next(iter(user.find(marker="p_bg").elements)).set_value("depth"); next(iter(user.find(marker="p_isobaths").elements)).set_value(True)
+    await asyncio.sleep(0.1)
+    assert plot.figure["layout"]["title"]["text"].startswith("profundidad")      # (fondo plano: sin isobatas que dibujar)
+    rb = next(iter(user.find(marker="p_release").elements))
+    next(h.handler for h in rb._event_listeners.values() if h.type == "click")(None)
+    for _ in range(100):
+        await asyncio.sleep(0.1)
+        if len(plot.figure["data"]) >= 4:
+            break
+    calls = []
+    monkeypatch.setattr(type(plot), "run_plot_method", lambda self, name, *a, **k: calls.append((name, a)))
+    tsl = next(iter(user.find(marker="p_time").elements))
+    for k in range(1, 7):                                   # arrastre: muchos valores seguidos
+        tsl.set_value(k)
+    await asyncio.sleep(0.4)
+    assert 1 <= sum(1 for n, a in calls if n == "restyle" and a[1] == [1, 3]) <= 2
+    assert not any(n == "restyle" and a[1] == [0] for n, a in calls)          # con batimetría de fondo no se reenvía el campo
+    await user.open(f"/results?case={p}&tab=particles")                    # recargar la página
+    await user.should_see("distancia media recorrida")

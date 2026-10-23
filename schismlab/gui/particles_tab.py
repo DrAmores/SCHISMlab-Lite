@@ -13,6 +13,7 @@ from .explorer import CLICK_JS
 from ..analysis.particles import track as track_particles, release_points, is_geographic
 
 NGRID = 220
+_TRACKS: dict = {}            # carpeta de la simulación -> (trayectorias, parámetros): se recuperan al recargar la página
 
 
 class _Grid:
@@ -57,7 +58,10 @@ def particles_tab(ds, c: dict, wd: Path, t: dict, lang: str, est, dark: bool = F
     vars_ = [v for v in est.vars if (v in ds or (v + "X") in ds) and "node" in (ds[v].dims if v in ds else ds[v + "X"].dims)]
     g = _Grid(ds)
     S = {"var": est.var if est.var in vars_ else (vars_[0] if vars_ else None), "layer": nvrt - 1, "start": 0, "k": 0, "tr": None,
-         "its": None, "zr": None}
+         "its": None, "zr": None, "bg": "field", "isob": False, "want": None}
+    _o = Path(wd) / "outputs"
+    _stamp = max((f.stat().st_mtime for f in _o.glob("out2d_*.nc")), default=0.0) if _o.is_dir() else 0.0
+    key = f"{Path(wd).resolve()}:{nt}:{_stamp}"                  # otra simulación del caso: no se recuperan trayectorias viejas
 
     def layer_text(k: int) -> str:
         return t["surface"] if k >= nvrt - 1 else (t["bottom"] if k == 0 else f"{t['layer']} {k + 1}")
@@ -76,6 +80,8 @@ def particles_tab(ds, c: dict, wd: Path, t: dict, lang: str, est, dark: bool = F
                 ui.label(t["p_layer"]).classes("text-caption text-grey-7")
                 lay = ui.slider(min=0, max=max(0, nvrt - 1), value=S["layer"]).props(f'label-always label-value="{layer_text(S["layer"])}"').classes("w-full").mark("p_layer")
             lay_box.set_visibility(nvrt > 1)
+            bg = ui.select({"field": t["bg_field"], "depth": t["bg_depth"]}, value="field", label=t["background"]).props("dense").classes("w-full").mark("p_bg")
+            isob = ui.switch(t["p_isobaths"], value=False).mark("p_isobaths")
             ui.separator().classes("q-my-sm")
             ui.label(t["p_release"]).classes("text-subtitle2")
             ui.label(t["p_start"]).classes("text-caption text-grey-7")
@@ -114,12 +120,25 @@ def particles_tab(ds, c: dict, wd: Path, t: dict, lang: str, est, dark: bool = F
             S["zr"] = dataset_range(ds, S["var"], S["layer"])
         return S["zr"]
 
+    depth_grid = {}
+    def dgrid():
+        if "z" not in depth_grid:
+            depth_grid["z"] = g.z(ds.depth.values)
+        return depth_grid["z"]
+
     def build():
         it = field_it(); v = S["var"]
-        lo, hi = zrange()
-        cmap = "RdBu_r" if v == "elevation" else "Viridis"
-        fig = go.Figure(go.Heatmap(x=g.xi, y=g.yi, z=g.z(_values(ds, v, it, S["layer"])), colorscale=cmap, zmin=lo, zmax=hi, zsmooth="best",
-                                   colorbar=dict(title=LABELS.get(v, v), thickness=14, tickformat=".3g"), hoverinfo="skip"))
+        if S["bg"] == "depth":                                   # batimetría de fondo: se ven los efectos topográficos
+            Zb = dgrid(); fin = Zb[np.isfinite(Zb)]
+            lo, hi = (float(fin.min()), float(np.percentile(fin, 99.5))) if fin.size else (0.0, 1.0)
+            heat = go.Heatmap(x=g.xi, y=g.yi, z=Zb, colorscale="deep", zmin=lo, zmax=hi if hi > lo else lo + 1, zsmooth="best",
+                              colorbar=dict(title=LABELS.get("depth", "profundidad (m)"), thickness=14, tickformat=".3g"), hoverinfo="skip")
+        else:
+            lo, hi = zrange()
+            cmap = "RdBu_r" if v == "elevation" else "Viridis"
+            heat = go.Heatmap(x=g.xi, y=g.yi, z=g.z(_values(ds, v, it, S["layer"])), colorscale=cmap, zmin=lo, zmax=hi, zsmooth="best",
+                              colorbar=dict(title=LABELS.get(v, v), thickness=14, tickformat=".3g"), hoverinfo="skip")
+        fig = go.Figure(heat)
         tr, k = S["tr"], S["k"]
         if tr is not None:
             tx, ty = _trails(tr, k)
@@ -129,13 +148,23 @@ def particles_tab(ds, c: dict, wd: Path, t: dict, lang: str, est, dark: bool = F
                                      name=t["p_now"], hoverinfo="skip"))
         cx, cy = _circle(float(px0.value or 0), float(py0.value or 0), float(prad.value or 0), geo)
         fig.add_trace(go.Scatter(x=cx, y=cy, mode="lines", line=dict(color="#e4572e", width=1.5, dash="dot"), name=t["p_zone"], hoverinfo="skip"))
+        if S["isob"]:                                            # isobatas encima (después de las partículas: no cambian los índices)
+            from .explorer import contour_trace
+            ct = contour_trace(dgrid(), g.xi, g.yi, 0.0, dark)
+            if ct is not None:
+                fig.add_trace(ct)
         fig.update_layout(**{**LAYOUT, "margin": dict(l=50, r=20, t=30, b=40)},
-                          title=f"{v} · {layer_text(S['layer']) + ' · ' if nvrt > 1 else ''}{tlabel(it)}",
+                          title=title_text(it),
                           xaxis=dict(title="longitud" if geo else "x (m)", constrain="domain", range=[float(g.xi[0]), float(g.xi[-1])]),
                           yaxis=dict(title="latitud" if geo else "y (m)", scaleanchor="x", scaleratio=_aspect(ds.y.values), range=[float(g.yi[0]), float(g.yi[-1])]),
                           legend=dict(orientation="h", y=-0.08), uirevision="particulas")
         plot.update_figure(themed(fig, dark))
         tlab.set_text(tlabel(it))
+
+    def title_text(it):
+        if S["bg"] == "depth":
+            return f"{t['bg_depth']} · {tlabel(it)}"
+        return f"{S['var']} · {layer_text(S['layer']) + ' · ' if nvrt > 1 else ''}{tlabel(it)}"
 
     def frame():
         """Fotograma k: campo y partículas por restyle (sin reenviar la figura)."""
@@ -144,12 +173,12 @@ def particles_tab(ds, c: dict, wd: Path, t: dict, lang: str, est, dark: bool = F
             build(); return
         it = field_it()
         try:
-            z = g.z(_values(ds, S["var"], it, S["layer"]))
             tx, ty = _trails(tr, k)
-            plot.run_plot_method("restyle", {"z": [_clean(z)]}, [0])
+            if S["bg"] != "depth":                               # la batimetría no cambia con el tiempo
+                z = g.z(_values(ds, S["var"], it, S["layer"]))
+                plot.run_plot_method("restyle", {"z": [_clean(z)]}, [0])
             plot.run_plot_method("restyle", {"x": [tx, _clean(tr.x[k])], "y": [ty, _clean(tr.y[k])]}, [1, 3])
-            ttl = f"{S['var']} · {layer_text(S['layer']) + ' · ' if nvrt > 1 else ''}{tlabel(it)}"
-            plot.run_plot_method("relayout", {"title.text": ttl})
+            plot.run_plot_method("relayout", {"title.text": title_text(it)})
             tlab.set_text(tlabel(it))
         except Exception:   # noqa: BLE001
             build()
@@ -167,6 +196,11 @@ def particles_tab(ds, c: dict, wd: Path, t: dict, lang: str, est, dark: bool = F
             rel_btn.props(remove="loading")
         if tr is None:                                   # la página se cerró mientras se calculaba
             return
+        _TRACKS[key] = tr
+        show_tracks(tr)
+    rel_btn.on_click(release)
+
+    def show_tracks(tr):
         S["tr"] = tr; S["k"] = 0
         S["its"] = [int(np.argmin(np.abs(ds.time.values - tt))) for tt in tr.time]
         tsl.props(f"max={max(1, tr.x.shape[0] - 1)}"); tsl._props["max"] = max(1, tr.x.shape[0] - 1); tsl.set_value(0)
@@ -179,7 +213,6 @@ def particles_tab(ds, c: dict, wd: Path, t: dict, lang: str, est, dark: bool = F
                 p = wd / "particulas.csv"; tr.to_csv(p); ui.download(p)
             ui.button(t["download_csv"], icon="download", on_click=dl).props("flat dense no-caps")
         build()
-    rel_btn.on_click(release)
 
     def on_click(e):
         pts = e.args.get("points", [])
@@ -197,9 +230,12 @@ def particles_tab(ds, c: dict, wd: Path, t: dict, lang: str, est, dark: bool = F
         if S["tr"] is None:
             build()
     def on_time(e):
-        if S["tr"] is None:
+        S["want"] = int(e.value)                                  # se dibuja solo el último valor (ver render_time)
+    def render_time():
+        if S["want"] is None or S["tr"] is None:
             return
-        S["k"] = min(int(e.value), S["tr"].x.shape[0] - 1); frame()
+        S["k"] = min(S["want"], S["tr"].x.shape[0] - 1); S["want"] = None; frame()
+    ui.timer(0.08, render_time)
 
     def tick():
         if S["tr"] is None:
@@ -217,7 +253,12 @@ def particles_tab(ds, c: dict, wd: Path, t: dict, lang: str, est, dark: bool = F
         play.props(f"icon={'pause' if timer.active else 'play_arrow'}")
     play.on_click(toggle)
     var.on_value_change(on_var); lay.on_value_change(on_layer); start.on_value_change(on_start); tsl.on_value_change(on_time)
+    bg.on_value_change(lambda e: (S.update(bg=e.value), build()))
+    isob.on_value_change(lambda e: (S.update(isob=bool(e.value)), build()))
     for w_ in (px0, py0, prad):
         w_.on_value_change(lambda e: build() if S["tr"] is None or not timer.active else None)
-    build()
+    if key in _TRACKS:                                           # página recargada: las partículas ya calculadas siguen ahí
+        show_tracks(_TRACKS[key])
+    else:
+        build()
     return S

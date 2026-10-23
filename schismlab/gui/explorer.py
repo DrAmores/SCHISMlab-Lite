@@ -649,8 +649,16 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             sfig.run_plot_method("relayout", {"shapes[0].x0": tc, "shapes[0].x1": tc})
         except Exception:   # noqa: BLE001  (figura cambiada mientras tanto: se redibuja)
             sfig.update_figure(series_figure_multi(st, st.var, lang, wd))
+    pend = {"it": None}
     def on_time(e):
-        st.it = int(e.value); refresh_time_label(); refresh_map_time(); move_cursor()
+        """Al arrastrar la barra llegan decenas de valores: se guarda el último y un temporizador dibuja solo ese
+        (si se dibujaran todos, los mensajes saturan la conexión y el navegador recarga la página)."""
+        pend["it"] = int(e.value)
+    def render_time():
+        if pend["it"] is None:
+            return
+        st.it = pend["it"]; pend["it"] = None
+        refresh_time_label(); refresh_map_time(); move_cursor()
         if not in_sections():
             refresh_profile()                                      # el perfil vertical sigue al tiempo
         if state_sec["active"] is not None and in_sections():     # la sección sigue al tiempo solo si se está viendo
@@ -794,6 +802,7 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         st.click_mode = "section" if in_sections() else "point"; st.pending = None; armed["mode"] = None; refresh_map()
     panels.on_value_change(on_subtab)
     tsl.on_value_change(on_time)
+    ui.timer(0.08, render_time)
     comp_sel.on_value_change(lambda e: (setattr(st, "component", e.value), sfig.update_figure(series_figure_multi(st, st.var, lang, wd))))
     svar.on_value_change(lambda e: show_section(state_sec["active"])); scont.on_value_change(lambda e: show_section(state_sec["active"])); wf.on_value_change(lambda e: show_section(state_sec["active"]))
     plot.on("plotly_click", on_click, js_handler=CLICK_JS); plot.on("plotly_relayout", on_relayout)
