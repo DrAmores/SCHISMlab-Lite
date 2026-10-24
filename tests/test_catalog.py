@@ -34,3 +34,16 @@ def test_write_other_namelist(tmp_path: Path):
     out = tmp_path / "sediment.nml"
     write_param(out, {"Nbed": 3}, template=template_path("sediment.nml"))
     assert "Nbed = 3" in out.read_text()
+
+
+def test_auto_keys_segun_edicion():
+    """Las claves automáticas se leen del código que exista en esta edición (en Lite no hay waves.py ni setup_pro.py)."""
+    from schismlab import edition
+    from schismlab.io import namelist_catalog as nc
+    nc.auto_keys.cache_clear()
+    p, w = nc.auto_keys("param.nml"), nc.auto_keys("wwminput.nml")
+    assert {"dt", "rnday", "nspool"} <= p
+    if edition.is_pro():
+        assert {"msc2", "mdc2", "icou_elfe_wwm", "nstep_wwm"} <= p and {"MSC", "MDC", "DELTC"} <= w
+    else:
+        assert w == frozenset()

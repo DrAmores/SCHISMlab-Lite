@@ -3,6 +3,11 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.6.2 (2026-10-24) — Página Parámetros
+
+- Pasar a **Parámetros** daba un error 500 («No such file or directory: …/schismlab/forcing/waves.py»): la página buscaba en un sitio antiguo el código que dice qué parámetros fija
+  SCHISMlab. Ya no hace falta.
+
 ## 0.6.1 (2026-10-24)
 
 - Sin cambios en SCHISMlab Lite (versión a la par con SCHISMlab Pro, que corrige la compilación con oleaje cuando el

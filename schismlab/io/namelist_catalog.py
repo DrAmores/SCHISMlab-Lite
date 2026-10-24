@@ -137,22 +137,42 @@ def defaults(namelist: str = "param.nml") -> dict[str, str]:
     return {e.name: e.default for e in catalog(namelist)}
 
 
+def _pro_dir() -> Path | None:
+    """Carpeta del paquete schismlab_pro si esta instalación es Pro (None en Lite)."""
+    from schismlab import edition
+    if not edition.is_pro():
+        return None
+    mod = edition._load()["module"]
+    return Path(mod.__file__).resolve().parent if mod is not None and getattr(mod, "__file__", None) else None
+
+
 @lru_cache(maxsize=None)
 def auto_keys(namelist: str = "param.nml") -> frozenset[str]:
-    """Claves que SCHISMlab fija automáticamente a partir del YAML (se leen del código de setup.py / waves.py)."""
+    """Claves que SCHISMlab fija automáticamente a partir del YAML (se leen del código de setup.py y, en Pro, de
+    schismlab_pro: setup_pro.py, forcing/*.py y forcing/waves.py)."""
     src_dir = Path(__file__).resolve().parent.parent
+    pro_dir = _pro_dir()
     if namelist == "param.nml":
-        text = (src_dir / "setup.py").read_text(encoding="utf-8")
-        keys = set(re.findall(r'self\.param\["(\w+(?:\(\d+\))?)"\]', text))
-        for call in re.findall(r"self\.param\.update\((.*?)\)\n", text, re.S):
-            keys.update(re.findall(r"\b(\w+)=", call))
-            keys.update(re.findall(r'"(\w+\(\d+\))"', call))
-        keys.update(re.findall(r'"(\w+)\(', text))          # f"iof_hydro({i})"
-        keys.discard("flags"); keys.discard("self")
-        return frozenset(keys)
+        files = [src_dir / "setup.py"]
+        if pro_dir is not None:
+            files += [pro_dir / "setup_pro.py", *sorted((pro_dir / "forcing").glob("*.py"))]
+        keys = set()
+        for f in files:
+            if not f.exists():
+                continue
+            text = f.read_text(encoding="utf-8")
+            keys.update(re.findall(r'\b(?:self|s)\.param\["(\w+(?:\(\d+\))?)"\]', text))
+            for call in re.findall(r"\b(?:self|s)\.param\.update\((.*?)\)\n", text, re.S):
+                keys.update(re.findall(r"\b(\w+)=", call))
+                keys.update(re.findall(r'"(\w+\(\d+\))"', call))
+            keys.update(re.findall(r'"(\w+)\(', text))          # f"iof_hydro({i})"
+        keys.discard("flags"); keys.discard("self"); keys.discard("s")
+        return frozenset(k for k in keys if not k.startswith("_"))
     if namelist == "wwminput.nml":
-        text = (src_dir / "forcing" / "waves.py").read_text(encoding="utf-8")
-        return frozenset(re.findall(r'_set\(t, "(\w+)"', text))
+        f = pro_dir / "forcing" / "waves.py" if pro_dir is not None else None
+        if f is None or not f.exists():   # Lite: el oleaje (WWM) es de Pro
+            return frozenset()
+        return frozenset(re.findall(r'_set\(t, "(\w+)"', f.read_text(encoding="utf-8")))
     return frozenset()
 
 
