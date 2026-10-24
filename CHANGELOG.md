@@ -3,6 +3,11 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.6.1 (2026-10-24)
+
+- Sin cambios en SCHISMlab Lite (versión a la par con SCHISMlab Pro, que corrige la compilación con oleaje cuando el
+  oleaje está desactivado).
+
 ## 0.6.0 (2026-10-23)
 
 - Sin cambios en SCHISMlab Lite (versión a la par con SCHISMlab Pro, que añade los tsunamis por deformación del fondo).
