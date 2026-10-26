@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 import numpy as np
 from .case import Case
-from .edition import pro
+from .edition import pro, default_generator
 from .io.gr3 import Mesh, read_gr3, write_gr3, write_prop
 from .io.param import write_param
 from .mesh.build import build_mesh
@@ -159,6 +159,11 @@ class RunSetup:
                           nchi=-1, hmin_man=float(ph.get("hmin_man", 0.2 if (self.cfg.get("mesh") or {}).get("inundation") else 1.0)), ihdif=0, ishapiro=int(ph.get("shapiro", 1)),
                           indvel=int(ph.get("indvel", 0)), ihorcon=int(ph.get("ihorcon", 0)),
                           hvis_coef0=float(ph.get("hvis_coef0", 0.025)), thetai=float(ph.get("thetai", 0.6)))
+        # filtro de Shapiro: 0.5 (el máximo, plantilla de SCHISM) frena las corrientes junto a las paredes en los dominios
+        # idealizados de las prácticas (oscilación inercial, columna de Taylor, frentes); en ellos el valor por defecto es 0.1.
+        # Las mallas reales (Pro, OCSMesh) conservan 0.5, con el que se han ajustado y validado.
+        idealized = (self.cfg.get("mesh") or {}).get("generator", default_generator()) == "idealized"
+        self.param["shapiro0"] = float(ph.get("shapiro0", 0.1 if idealized else 0.5))
         fr = (self.cfg.get("friction") or {})
         if fr.get("landcover"):                                   # rugosidad por uso del suelo (WorldCover / CORINE / propio)
             from .edition import pro as _pro
@@ -205,7 +210,7 @@ class RunSetup:
             f = initial_fields(ds, self.lon, self.lat, z)
             eta = f.get("eta", np.zeros(self.m.nnodes))
             eta = eta - float(np.mean(eta))   # el nivel de Copernicus tiene un datum propio: se usa solo la anomalia espacial
-            write_hotstart(self.dir / "hotstart.nc", self.m, self.vg, temp=f["temp"], salt=f["salt"], eta=eta)
+            write_hotstart(self.dir / "hotstart.nc", self.m, self.vg, temp=f["temp"], salt=f["salt"], eta=eta, turb=self._turbulence_state())
             write_tracer_ic_gr3(self.dir / "temp.ic", self.m, f["temp"][:, -1]); write_tracer_ic_gr3(self.dir / "salt.ic", self.m, f["salt"][:, -1])
             self.param.update(ihot=1, **{"flag_ic(1)": 1, "flag_ic(2)": 1})
             return
@@ -225,7 +230,7 @@ class RunSetup:
             frame_s = {k: 0.5 * (a[sd[:, 0]] + a[sd[:, 1]]) for k, a in self.frame.items()}
             vs = expression_vars(frame_s, 0.5 * (self.m.depth[sd[:, 0]] + self.m.depth[sd[:, 1]]), 0.5 * (z[sd[:, 0]] + z[sd[:, 1]]))
             Us, Vs = (np.asarray(evaluate(e_, **vs), float) * np.ones((len(sd), z.shape[1])) for e_ in (u0, v0))
-            write_hotstart(self.dir / "hotstart.nc", self.m, self.vg, temp=Tn, salt=Sn, eta=eta_n, u=Us, v=Vs)
+            write_hotstart(self.dir / "hotstart.nc", self.m, self.vg, temp=Tn, salt=Sn, eta=eta_n, u=Us, v=Vs, turb=self._turbulence_state())
             self.param.update(ihot=1)
             if has_vel:
                 log.info("velocidad inicial (u, v) escrita en hotstart.nc")
@@ -499,6 +504,25 @@ class RunSetup:
         self.param.pop("_single_stack", None)
         write_param(self.dir / "param.nml", self.param)
         (self.dir / "nscribes").write_text(f"{self.nscribes}\n")
+
+    def _param_value(self, key: str):
+        """Valor final de una clave de param.nml: sobreescritura del YAML > lo que fija SCHISMlab > plantilla. Sirve
+        antes de que se apliquen las sobreescrituras (al final de outputs())."""
+        ov = self._nml_overrides("param.nml")
+        if key in ov:
+            return ov[key]
+        if key in self.param:
+            return self.param[key]
+        from .io.namelist_catalog import defaults
+        return defaults("param.nml").get(key)
+
+    def _turbulence_state(self) -> dict:
+        """q2, xl, dfv, dfh del hotstart: los que pondría SCHISM al arrancar en frío con los parámetros del caso."""
+        from .forcing.hotstart import turbulence_state
+        num = lambda v, d: float(str(v).lower().replace("d", "e")) if v is not None else d
+        return turbulence_state(int(num(self._param_value("itur"), 0)), self.m.depth, dfv0=num(self._param_value("dfv0"), 1e-2),
+                                dfh0=num(self._param_value("dfh0"), 1e-4), turb_met=str(self._param_value("mid") or "KL"),
+                                h0=num(self._param_value("h0"), 0.01))
 
     def _nml_overrides(self, name: str) -> dict:
         """Sobreescrituras del YAML para un fichero .nml: `namelists: {param.nml: {...}, wwminput.nml: {...}}` (y `param:` para param.nml)."""

@@ -58,7 +58,7 @@ def rotary_spectrum(u, v, dt: float, nperseg: int | None = None, overlap: float 
     f, P = np.fft.fftshift(f), np.fft.fftshift(P.real)
     pos = f > 0; neg = f < 0
     fp = f[pos]
-    return dict(f=fp, period_h=1.0 / fp / 3600, ccw=P[pos], cw=P[neg][::-1])
+    return dict(f=fp, period_h=1.0 / fp / 3600, ccw=P[pos], cw=P[neg][::-1][:fp.size])   # con nperseg par, f < 0 incluye Nyquist: un punto más
 
 
 def _ar1(y: np.ndarray) -> float:

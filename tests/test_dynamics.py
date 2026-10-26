@@ -218,7 +218,7 @@ def test_explorer_iso_mode():
     s = st.add_section((2e3, 10e3), (38e3, 10e3))
     fig = section_figure2(s["sec"], "temperature", 1, arrows=False, iso=("temperature", 15.0))
     assert np.allclose(fig.data[-1].y, -40.0)                          # línea de la isoterma en la sección
-    assert iso_hovmoller_figure(s["sec"], "temperature", 15.0, "h").data[0].z.shape[0] == nt
+    assert len(iso_hovmoller_figure(s["sec"], "temperature", 15.0, "h").data[0].z) == nt
     st.depth_mode = "layer"; assert not st.iso_ok()
 
 

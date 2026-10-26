@@ -12,16 +12,33 @@ LAYOUT = dict(margin=dict(l=40, r=20, t=40, b=40), template="plotly_white", font
 LABELS_BY_LANG = {
     "es": {"elevation": "elevación (m)", "depthAverageVel": "|U| (m/s)", "horizontalVel": "|u| (m/s)", "temperature": "T (°C)",
            "salinity": "S (psu)", "verticalVelocity": "w (m/s)", "windStress": "τ (m²/s²)", "windSpeed": "viento (m/s)",
-           "sigWaveHeight": "Hs (m)", "depth": "profundidad (m)", "airPressure": "presión (Pa)", "waterDensity": "ρ (kg/m³)", "density": "σt (kg/m³)"},
+           "sigWaveHeight": "Hs (m)", "depth": "profundidad (m)", "airPressure": "presión (Pa)", "waterDensity": "ρ (kg/m³)", "density": "σt (kg/m³)",
+           "vorticity": "ζ (1/s)", "vorticity_f": "ζ/f", "transport": "|T| (m²/s)", "streamfunction": "ψ (Sv)", "viscosity": "viscosidad (m²/s)",
+           "diffusivity": "difusividad (m²/s)"},
     "en": {"elevation": "elevation (m)", "depthAverageVel": "|U| (m/s)", "horizontalVel": "|u| (m/s)", "temperature": "T (°C)",
            "salinity": "S (psu)", "verticalVelocity": "w (m/s)", "windStress": "τ (m²/s²)", "windSpeed": "wind (m/s)",
-           "sigWaveHeight": "Hs (m)", "depth": "depth (m)", "airPressure": "pressure (Pa)", "waterDensity": "ρ (kg/m³)", "density": "σt (kg/m³)"},
+           "sigWaveHeight": "Hs (m)", "depth": "depth (m)", "airPressure": "pressure (Pa)", "waterDensity": "ρ (kg/m³)", "density": "σt (kg/m³)",
+           "vorticity": "ζ (1/s)", "vorticity_f": "ζ/f", "transport": "|T| (m²/s)", "streamfunction": "ψ (Sv)", "viscosity": "viscosity (m²/s)",
+           "diffusivity": "diffusivity (m²/s)"},
 }
+# componentes con signo de las variables vectoriales: (nombre corto, unidades)
+VECTOR_PARTS = {"horizontalVel": ("u", "v", "m/s"), "depthAverageVel": ("U", "V", "m/s"), "windStress": ("τx/ρ0", "τy/ρ0", "m²/s²"),
+                "transport": ("Tx", "Ty", "m²/s"), "windSpeed": ("u10", "v10", "m/s")}
 LABELS = LABELS_BY_LANG["es"]          # compatibilidad (analysis/video.py): etiquetas en español
 
 
-def label(var: str, lang: str = "es") -> str:
-    """Etiqueta (con unidad) de una variable de salida en el idioma pedido; el nombre de la variable si no hay."""
+def label(var: str, lang: str = "es", comp: str = "mag") -> str:
+    """Etiqueta (con unidad) de una variable de salida en el idioma pedido; el nombre de la variable si no hay.
+    comp: componente de una variable vectorial («u» este, «v» norte, «normal», «tangential»)."""
+    if comp != "mag" and var in VECTOR_PARTS:
+        a, b, un = VECTOR_PARTS[var]
+        txt = {"u": f"{a} ({'este' if lang == 'es' else 'east'})", "v": f"{b} ({'norte' if lang == 'es' else 'north'})",
+               "normal": "normal" if lang != "es" else "normal", "tangential": "tangencial" if lang == "es" else "tangential"}.get(comp, comp)
+        if comp in ("normal", "tangential"):
+            txt = f"{var} {txt}"
+        return f"{txt} ({un})"
+    if comp != "mag" and var not in VECTOR_PARTS:
+        return f"{var} {comp}"
     return LABELS_BY_LANG.get(lang, LABELS).get(var, var)
 
 
@@ -76,6 +93,23 @@ class NodeSampler:
         return Z.reshape(self.yi.size, self.xi.size)
 
 
+def color_range(values, zmin=None, zmax=None, min_rel: float = 1e-6):
+    """(zmin, zmax, tickformat) de una barra de color legible: con un campo constante (o casi) fija un rango mínimo
+    alrededor del valor, para que el redondeo (diferencias de 1e-16) no pinte ruido; las marcas llevan los decimales
+    que pide el rango (p. ej. 1025.53–1027.56 en vez de «1.03e+3» repetido)."""
+    a = np.asarray(values, float); a = a[np.isfinite(a)]
+    if a.size == 0:
+        return zmin, zmax, ".3g"
+    lo = float(a.min()) if zmin is None else float(zmin); hi = float(a.max()) if zmax is None else float(zmax)
+    mid = 0.5 * (lo + hi); span = hi - lo
+    floor = max(abs(mid) * 1e-3, 1e-6)
+    if span <= max(min_rel * max(abs(mid), 1.0), 1e-12):         # campo constante: rango ±0.1 % del valor (mín. ±1e-6)
+        lo, hi, span = mid - floor, mid + floor, 2 * floor
+    d = int(np.clip(np.ceil(-np.log10(span / 5.0)) + 1, 0, 6))
+    fmt = f".{d}f" if abs(mid) < 1e5 else ".4g"
+    return lo, hi, fmt
+
+
 def _aspect(y):
     return 1 / np.cos(np.deg2rad(np.mean(y))) if np.ptp(y) < 180 else 1.0
 
@@ -94,13 +128,15 @@ def field_figure(x, y, elements, values, label: str, title: str = "", cmap="Viri
     xi, yi, Z = grid_field(x, y, elements, values, n)
     if symmetric and zmin is None:
         zmax = float(np.nanmax(np.abs(Z))); zmin = -zmax
+    geo = bool(np.nanmax(np.abs(x)) <= 360 and np.nanmax(np.abs(y)) <= 90.5)    # lon/lat o metros (dominios idealizados)
+    hov = "lon %{x:.3f}<br>lat %{y:.3f}<br>%{z:.3f}<extra></extra>" if geo else "x %{x:.0f} m<br>y %{y:.0f} m<br>%{z:.3f}<extra></extra>"
     fig = go.Figure(go.Heatmap(x=xi, y=yi, z=Z, colorscale=cmap, zmin=zmin, zmax=zmax, zsmooth="best",
-                               colorbar=dict(title=label, thickness=14, tickformat=".3g"), hovertemplate="lon %{x:.3f}<br>lat %{y:.3f}<br>%{z:.3f}<extra></extra>"))
+                               colorbar=dict(title=label, thickness=14, tickformat=".3g"), hovertemplate=hov))
     if boundaries:
         for (bx, by, color) in boundaries:
             fig.add_trace(go.Scatter(x=bx, y=by, mode="lines", line=dict(color=color, width=2), hoverinfo="skip", showlegend=False))
-    fig.update_layout(title=title, xaxis=dict(title="longitud", constrain="domain"), yaxis=dict(title="latitud", scaleanchor="x", scaleratio=_aspect(y)),
-                      **LAYOUT)
+    fig.update_layout(title=title, xaxis=dict(title="longitud" if geo else "x (m)", constrain="domain"),
+                      yaxis=dict(title="latitud" if geo else "y (m)", scaleanchor="x", scaleratio=_aspect(y)), **LAYOUT)
     return fig
 
 
@@ -177,6 +213,23 @@ def profile_figure(ds: xr.Dataset, var: str, node: int, z: np.ndarray, it: int =
         fig.add_trace(go.Scatter(x=ds[var].isel(node=node, time=it).values, y=z, mode="lines+markers", name=var))
         xt = label(var, lang)
     fig.update_layout(xaxis_title=xt, yaxis_title="z (m)", **LAYOUT)
+    return fig
+
+
+def profile_figure2(z, prof: dict, xlabel: str, lang: str = "es") -> go.Figure:
+    """Perfil vertical ya calculado: prof = {"u", "v"} (vector: también |v|) o {"y"}; z del fondo a la superficie."""
+    fig = go.Figure()
+    if "u" in prof:
+        u, v = np.asarray(prof["u"], float), np.asarray(prof["v"], float)
+        fig.add_trace(go.Scatter(x=u, y=z, mode="lines+markers", name="u", marker=dict(size=4)))
+        fig.add_trace(go.Scatter(x=v, y=z, mode="lines+markers", name="v", line=dict(dash="dash"), marker=dict(size=4)))
+        fig.add_trace(go.Scatter(x=np.hypot(u, v), y=z, mode="lines", name="|v|", line=dict(dash="dot", color="#888")))
+        un = xlabel.rsplit("(", 1)[-1].rstrip(")") if "(" in xlabel else "m/s"
+        xt = (f"u (este), v (norte), |v| ({un})" if lang == "es" else f"u (east), v (north), |v| ({un})")
+    else:
+        fig.add_trace(go.Scatter(x=np.asarray(prof["y"], float), y=z, mode="lines+markers", name=xlabel, marker=dict(size=4)))
+        xt = xlabel
+    fig.update_layout(xaxis_title=xt, yaxis_title="z (m)", legend=dict(orientation="h"), **LAYOUT)
     return fig
 
 
@@ -395,19 +448,36 @@ def arrows_trace(x, y, dx, dy, color="#222", width=1.0, head=0.3, name="", hover
     return go.Scatter(x=xs, y=ys, mode="lines", line=dict(color=color, width=width), hoverinfo="skip", showlegend=bool(name), name=name)
 
 
-def map_arrows(ds, it: int, layer: int = -1, n: int = 28, depth_m: float | None = None, vg=None, frac: float = 0.05):
-    """Traza de flechas de velocidad submuestreada en una rejilla n×n sobre el mapa; devuelve (traza, vmax m/s)."""
+def arrow_field(ds, var: str | None = None) -> str | None:
+    """Campo vectorial de las flechas del mapa: la propia variable si es vectorial (windStress, depthAverageVel...);
+    si no, la velocidad (horizontalVel o depthAverageVel). None si no hay ninguno."""
+    if var and var + "X" in ds:
+        return var
+    return "horizontalVel" if "horizontalVelX" in ds else ("depthAverageVel" if "depthAverageVelX" in ds else None)
+
+
+def arrow_units(name: str) -> str:
+    return {"windStress": "m²/s²", "transport": "m²/s"}.get(name, "m/s")
+
+
+def map_arrows(ds, it: int, layer: int = -1, n: int = 28, depth_m: float | None = None, vg=None, frac: float = 0.05,
+               var: str | None = None, uv=None):
+    """Traza de flechas submuestreada en una rejilla n×n sobre el mapa; devuelve (traza, módulo máximo). Las flechas son
+    de `var` si es vectorial (ver arrow_field) o de la velocidad; `uv=(u, v)` da directamente las componentes nodales."""
     from scipy.spatial import cKDTree
     from ..analysis.sections import field_at_depth
     x, y = ds.x.values, ds.y.values
-    name = "horizontalVel" if "horizontalVelX" in ds else "depthAverageVel"
-    if depth_m is not None and "layer" in ds[name + "X"].dims:
+    name = arrow_field(ds, var) or "horizontalVel"
+    if uv is not None:
+        u, v = (np.asarray(a, float) for a in uv)
+    elif depth_m is not None and "layer" in ds[name + "X"].dims:
         u = field_at_depth(ds, name + "X", it, depth_m, vg); v = field_at_depth(ds, name + "Y", it, depth_m, vg)
     else:
         u, v = ds[name + "X"].isel(time=it), ds[name + "Y"].isel(time=it)
         if "layer" in u.dims:
             u, v = u.isel(layer=layer), v.isel(layer=layer)
         u, v = u.values.astype(float), v.values.astype(float)
+    u = np.where(u < -9000, np.nan, u); v = np.where(v < -9000, np.nan, v)      # niveles bajo el fondo (relleno de SCHISM)
     xi = np.linspace(x.min(), x.max(), n); yi = np.linspace(y.min(), y.max(), int(n * np.ptp(y) * _aspect(y) / max(np.ptp(x), 1e-12)) or 10)
     X, Y = np.meshgrid(xi, yi)
     tree = cKDTree(np.c_[x, y]); d, idx = tree.query(np.c_[X.ravel(), Y.ravel()])
@@ -423,26 +493,77 @@ def map_arrows(ds, it: int, layer: int = -1, n: int = 28, depth_m: float | None 
     return arrows_trace(X.ravel(), Y.ravel(), dx, dy, color="#111", width=1), vmax
 
 
+def section_ends(fig, sec, lang: str = "es", heatmap: bool = True):
+    """Rotula los extremos de una sección (O/E, S/N... según su rumbo) y el eje «distancia (km) desde O»."""
+    from ..analysis.sections import compass
+    tx, ty = sec.tangent
+    a, b = compass(-tx, -ty, lang), compass(tx, ty, lang)
+    for x_, txt, anc in ((0.0, a, "left"), (1.0, b, "right")):
+        fig.add_annotation(x=x_, y=1.0, xref="paper", yref="paper", text=f"<b>{txt}</b>", showarrow=False, xanchor=anc, yanchor="bottom",
+                           font=dict(size=12, color="#555"))
+    fig.update_xaxes(title_text=(f"distancia desde el extremo {a} (km)" if lang == "es" else f"distance from the {a} end (km)"))
+    return fig
+
+
+def section_line_figure(sec, y, ylabel: str, lang: str = "es", dark: bool = False, log: bool = False, ref: float = 0.0,
+                        fit=None, integ=None, units: str = "", title: str | None = None):
+    """Perfil de una variable 2D (o de una componente) a lo largo de la sección, con eje Y logarítmico opcional (de
+    |y − ref|), ajuste lineal en un tramo (pendiente α y escala 1/α) e integral entre dos distancias. Devuelve
+    (figura, lecturas: dict con fit, integral, unidades y cruces por cero)."""
+    from ..analysis.profiles import line_fit, line_integral, zero_crossings
+    y = np.asarray(y, float); d = np.asarray(sec.dist, float)
+    info = dict(zeros=zero_crossings(d, y))
+    yy = np.abs(y - ref) if log else y - ref
+    fig = go.Figure(go.Scatter(x=d, y=yy, mode="lines", line=dict(width=2, color="#0e9aa7"), name=ylabel,
+                               hovertemplate="%{x:.1f} km<br>%{y:.4g}<extra></extra>"))
+    if fit is not None:
+        r = line_fit(d, y, fit[0], fit[1], log=log, ref=ref)
+        info["fit"] = r
+        if r is not None:
+            xs = np.linspace(r["x0_km"], r["x1_km"], 50)
+            yl = r["alpha"] * xs * 1e3 + r["intercept"]
+            fig.add_trace(go.Scatter(x=xs, y=np.exp(yl) if log else yl, mode="lines", line=dict(color="#d8542b", width=2, dash="dash"),
+                                     name="ajuste" if lang == "es" else "fit", hoverinfo="skip"))
+    if integ is not None:
+        I = line_integral(d, y, integ[0], integ[1])
+        info["integral"] = I; info["integral_units"] = (units + "·m").replace("m²/s·m", "m³/s") if units else "·m"
+        if I is not None:
+            a, b = min(integ), max(integ)
+            fig.add_vrect(x0=a, x1=b, fillcolor="rgba(216,84,43,0.10)", line_width=0)
+    if not log and np.nanmin(yy) < 0 < np.nanmax(yy):
+        fig.add_hline(y=0, line=dict(color="#999", width=1))
+    ytitle = (f"|{ylabel} − {ref:g}|" if ref else f"|{ylabel}|") if log else (f"{ylabel} − {ref:g}" if ref else ylabel)
+    fig.update_layout(yaxis=dict(title=ytitle, type="log" if log else "linear"), showlegend=False, **layout(dark))
+    if title:
+        fig.update_layout(title=dict(text=title, font=dict(size=12)))
+    return section_ends(fig, sec, lang), info
+
+
 def section_figure2(sec, var: str, it: int, arrows: bool = True, contours: bool = True, wfactor: float = 200.0,
-                    zrange=None, lang: str = "es", nx_arrows: int = 24, nz_arrows: int = 12, dark: bool = False, iso=None) -> go.Figure:
+                    zrange=None, lang: str = "es", nx_arrows: int = 24, nz_arrows: int = 12, dark: bool = False, iso=None,
+                    F=None, z=None, vel=None, clabel: str | None = None, cs: str | None = None, title: str | None = None) -> go.Figure:
     """Sección vertical de `var` con isolíneas y flechas (u_s, w·wfactor) a partir de un objeto Section.
-    `iso=(variable, valor)` superpone la isosuperficie (p. ej. la isoterma de 15 °C) como línea gruesa: espesor h(x)."""
-    F = sec.scalar(var, it); z = sec.z(it)
+    `iso=(variable, valor)` superpone la isosuperficie (p. ej. la isoterma de 15 °C) como línea gruesa: espesor h(x).
+    F, z, vel: valores ya calculados (npts, nvrt) — media de una ventana, una componente o una variable derivada — y
+    (u_s, w) de las flechas; sin ellos, los del instante `it`."""
+    F = sec.scalar(var, it) if F is None else np.asarray(F, float)
     if F.ndim == 1:                                                    # variable 2D: nada que cortar en vertical
         fig = go.Figure(go.Scatter(x=sec.dist, y=F, mode="lines"))
-        fig.update_layout(xaxis_title="distancia (km)" if lang == "es" else "distance (km)", yaxis_title=label(var, lang), **layout(dark)); return fig
+        fig.update_layout(xaxis_title="distancia (km)" if lang == "es" else "distance (km)", yaxis_title=clabel or label(var, lang), **layout(dark))
+        return section_ends(fig, sec, lang)
+    z = sec.z(it) if z is None else z
     zi, Z = sec.regular(F, z)
     zmin, zmax = (zrange if zrange else (float(np.nanmin(Z)), float(np.nanmax(Z))))
-    cs = "RdYlBu_r" if var == "temperature" else ("RdBu_r" if var in ("verticalVelocity",) else "Viridis")
+    cs = cs or ("RdYlBu_r" if var == "temperature" else ("RdBu_r" if var in ("verticalVelocity",) else "Viridis"))
     fig = go.Figure(go.Heatmap(x=sec.dist, y=zi, z=Z, colorscale=cs, zmin=zmin, zmax=zmax, zsmooth="best",
-                               colorbar=dict(title=label(var, lang), thickness=14, tickformat=".3g"),
+                               colorbar=dict(title=clabel or label(var, lang), thickness=14, tickformat=".3g"),
                                hovertemplate="%{x:.1f} km<br>z %{y:.1f} m<br>%{z:.3f}<extra></extra>"))
     if contours and np.isfinite(Z).any() and zmax > zmin:
         fig.add_trace(go.Contour(x=sec.dist, y=zi, z=Z, showscale=False, contours=dict(coloring="none", start=zmin, end=zmax, size=(zmax - zmin) / 10),
                                  line=dict(color="rgba(0,0,0,0.45)", width=1), hoverinfo="skip", showlegend=False))
     if arrows:
         try:
-            us, un, w = sec.velocity(it)
+            us, un, w = sec.velocity(it) if vel is None else (vel[0], None, vel[1])
             W = np.zeros_like(us) if w is None else w * wfactor
             zi2, US = sec.regular(us, z, nz=nz_arrows); _, WW = sec.regular(W, z, nz=nz_arrows)
             cols = np.linspace(0, sec.dist.size - 1, nx_arrows).astype(int)
@@ -473,24 +594,40 @@ def section_figure2(sec, var: str, it: int, arrows: bool = True, contours: bool 
         except (KeyError, ValueError):
             pass
     fig.update_layout(xaxis_title="distancia (km)" if lang == "es" else "distance (km)", yaxis=dict(title="z (m)", range=[ymin, float(zi.max())]), showlegend=False, **layout(dark))
-    return fig
+    if title:
+        fig.update_layout(title=dict(text=title, font=dict(size=12)))
+    return section_ends(fig, sec, lang)
 
 
 def iso_hovmoller_figure(sec, var: str, value: float, title: str, lang: str = "es", dark: bool = False) -> go.Figure:
     """h(x, t): profundidad (m) de la isosuperficie var = value a lo largo de la sección, distancia × tiempo."""
     H = sec.iso_hovmoller(var, float(value))
-    fig = go.Figure(go.Heatmap(x=sec.dist, y=sec.ds.time.values, z=H, colorscale="deep", zsmooth="best",
+    # donde la isosuperficie no corta la columna (aflora o queda bajo el fondo) H es NaN: se pinta en gris, no como h = 0
+    Z = np.where(np.isfinite(H), H, None).tolist()
+    fig = go.Figure(go.Heatmap(x=sec.dist, y=sec.ds.time.values, z=Z, colorscale="deep", zsmooth=False, connectgaps=False,
                                colorbar=dict(title=title, thickness=14, tickformat=".3g"), hovertemplate="%{x:.1f} km<br>%{y}<br>%{z:.1f} m<extra></extra>"))
-    fig.update_layout(xaxis_title="distancia (km)" if lang == "es" else "distance (km)", yaxis_title="tiempo" if lang == "es" else "time", **layout(dark))
-    return fig
+    lay = layout(dark); lay["plot_bgcolor"] = "#9e9e9e"
+    fig.update_layout(xaxis_title="distancia (km)" if lang == "es" else "distance (km)", yaxis_title="tiempo" if lang == "es" else "time", **lay)
+    if not np.isfinite(H).all():
+        fig.add_annotation(x=0.5, y=-0.16, xref="paper", yref="paper", showarrow=False, font=dict(size=10, color="#555"),
+                           text=("gris: la isosuperficie no corta la columna (aflora o queda bajo el fondo)" if lang == "es"
+                                 else "grey: the isosurface does not cross the water column (outcrops or lies below the bottom)"))
+    return section_ends(fig, sec, lang)
 
 
-def hovmoller_figure(sec, var: str, layer: int = -1, lang: str = "es", dark: bool = False) -> go.Figure:
-    H = sec.hovmoller(var, layer)
-    fig = go.Figure(go.Heatmap(x=sec.dist, y=sec.ds.time.values, z=H, colorscale="RdYlBu_r" if var == "temperature" else "Viridis", zsmooth="best",
-                               colorbar=dict(title=label(var, lang), thickness=14, tickformat=".3g"), hovertemplate="%{x:.1f} km<br>%{y}<br>%{z:.3f}<extra></extra>"))
+def hovmoller_figure(sec, var: str, layer: int = -1, lang: str = "es", dark: bool = False, H=None, clabel: str | None = None,
+                     signed: bool = False) -> go.Figure:
+    """Diagrama distancia–tiempo de `var` en la capa `layer`; H (tiempo, distancia) ya calculado para componentes,
+    variables 2D o derivadas. signed: escala de colores centrada en 0."""
+    H = sec.hovmoller(var, layer) if H is None else np.asarray(H, float)
+    zr = {}
+    if signed and np.isfinite(H).any():
+        m = float(np.nanpercentile(np.abs(H), 99)); zr = dict(zmin=-m, zmax=m) if m > 0 else {}
+    cs = "RdBu_r" if signed else ("RdYlBu_r" if var == "temperature" else "Viridis")
+    fig = go.Figure(go.Heatmap(x=sec.dist, y=sec.ds.time.values, z=H, colorscale=cs, zsmooth="best", **zr,
+                               colorbar=dict(title=clabel or label(var, lang), thickness=14, tickformat=".3g"), hovertemplate="%{x:.1f} km<br>%{y}<br>%{z:.4g}<extra></extra>"))
     fig.update_layout(xaxis_title="distancia (km)" if lang == "es" else "distance (km)", yaxis_title="tiempo" if lang == "es" else "time", **layout(dark))
-    return fig
+    return section_ends(fig, sec, lang)
 
 
 def _ref_lines(fig, refs: dict, xaxis_period: bool = True, xr: tuple | None = None):

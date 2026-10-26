@@ -64,7 +64,7 @@ def particles_tab(ds, c: dict, wd: Path, t: dict, lang: str, est, dark: bool = F
     key = f"{Path(wd).resolve()}:{nt}:{_stamp}"                  # otra simulación del caso: no se recuperan trayectorias viejas
 
     def layer_text(k: int) -> str:
-        return t["surface"] if k >= nvrt - 1 else (t["bottom"] if k == 0 else f"{t['layer']} {k + 1}")
+        return t["surface"] if k >= nvrt - 1 else (t["bottom_zero"] if k == 0 else f"{t['layer']} {k + 1}")
 
     def tlabel(it):
         return np.datetime_as_string(ds.time.values[it], "m").replace("T", " ")

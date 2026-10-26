@@ -56,8 +56,10 @@ Pulsa *Generar malla* y verás el mapa interactivo de profundidades y la calidad
 ### Revisar la malla: estadísticas, mapa de resolución y tiempo estimado
 
 Cuando el caso ya tiene malla (recién generada, de una sesión anterior o importada), la parte de abajo de *Dominio
-y malla* muestra **Malla actual**: nodos y elementos, resolución (percentiles 5, 50 y 95 y mínimo–máximo), ángulo
-mínimo, profundidades, el **CFL** y un histograma de tamaños. El mapa superpone, sobre el mapa
+y malla* muestra **Malla actual**: nodos y elementos, resolución (percentiles 5, 50 y 95 y mínimo–máximo de la
+**arista media** de cada triángulo), la **arista más corta** (mediana; en una rejilla regular de cuadrados partidos en
+dos es el dx de la malla, mientras que la arista media vale 1,14·dx), ángulo mínimo, profundidades, el **CFL** y un
+histograma de tamaños. El mapa superpone, sobre el mapa
 base, la capa elegida: **Resolución** (tamaño de elemento en escala de color logarítmica), **Profundidad**,
 **Calidad** (ángulo mínimo; en rojo los elementos deformados), **CFL** o **Malla** (aristas). Al ampliar se redibuja a la
 resolución de la vista y, de cerca, se ven también las aristas. Para pedir un cambio, **dibuja una zona** sobre ese
@@ -111,7 +113,16 @@ suroeste); p. ej. `100 - 80*exp(-((x-150e3)**2 + (y-60e3)**2)/(2*20e3**2))`.
 La página está organizada en acordeones (Compilación y módulos, Instante, Malla vertical, Modelo, Condiciones
 iniciales y Escenario) cuyo subtítulo resume el estado actual («3D sigma · 11 niveles», «baroclino · k-kl», «1 día ·
 Δt 120 s»): fechas y duración, paso de tiempo, malla vertical (2D, sigma o sigma-z, con una descripción de cada tipo
-y el botón «Ver malla vertical» que dibuja los niveles), baroclino o no, cierre turbulento y condiciones iniciales.
+y el botón «Ver malla vertical» que dibuja los niveles), baroclino o no, cierre turbulento, filtro de Shapiro y
+condiciones iniciales.
+
+**Filtro de Shapiro (`shapiro0`).** Es un filtro numérico que suaviza la velocidad para quitar el ruido de malla. Con
+valores altos (0.5, el máximo) actúa como una fricción lateral: frena las corrientes junto a las paredes, ensancha las
+corrientes de frontera y amortigua las oscilaciones inerciales. En los dominios idealizados vale 0.1 por defecto; los
+casos guardados sin ese campo también usan 0.1.
+**Viscosidad vertical sin cierre turbulento.** Con «ninguno» la viscosidad y la difusividad verticales son constantes:
+`dfv0` (A_z) y `dfh0` (K_z), que aparecen en Modelo, debajo del cierre turbulento, al elegir «ninguno». Se respetan también cuando el caso arranca de un estado inicial completo
+(`hotstart.nc`, que se escribe si T, S o la velocidad dependen de la posición).
 
 Las condiciones iniciales se construyen variable a variable (elevación, temperatura, salinidad, velocidad u y v)
 eligiendo una **forma**: constante, frente (dos zonas con transición suave en x o y), dos capas (interfaz a una
@@ -202,25 +213,60 @@ de 15 °C, 37 para la isohalina de 37, 27 para la isopicna σt = 27) y el desliz
 modo el mapa, la serie de cada punto, la sección (línea gruesa sobre el corte, sea cual sea la variable dibujada) y
 el Hovmöller muestran la **profundidad a la que la variable vale ese valor**: es la forma de medir el espesor h(x, t)
 de una capa. La densidad σt aparece como variable derivada (UNESCO, de T y S) si no se guardó waterDensity. El resto (fondo del mapa, escala de
-colores, mínimo y máximo, **flechas** de velocidad, malla y escala fija entre instantes, velocidad de reproducción)
-está en el acordeón «Estilo del mapa» debajo del mapa. El deslizador de tiempo y el botón ▶ mueven el mapa y la
-sección activa a la vez. Lo que hace un clic en el mapa lo decide la subpestaña abierta debajo:
+colores, mínimo y máximo, **flechas**, malla y escala fija entre instantes, velocidad de reproducción) está en el
+acordeón «Estilo del mapa» debajo del mapa. Las flechas son las de la propia variable si es vectorial (`windStress`,
+`depthAverageVel`, `horizontalVel`) y, si no, las de la velocidad; la etiqueta de abajo dice de qué campo y de qué
+nivel son. El nivel 0 del deslizador de capa es el **fondo, donde SCHISM da siempre velocidad nula**; para ver la corriente
+junto al fondo usa el nivel 1. El deslizador de tiempo y el botón ▶ mueven el mapa y la sección activa a la vez; en el
+campo **Instante** se puede escribir una fecha y hora (AAAA-MM-DD HH:MM) y pulsar Intro para ir a la salida más
+próxima. Lo que hace un clic en el mapa lo decide la subpestaña abierta debajo:
 
-- **Puntos**: cada clic añade un punto (con nombre y color editables; las estaciones del caso ya aparecen) con su
-  serie temporal superpuesta a las demás y su perfil vertical en el instante actual; botón CSV.
+- **Puntos**: cada clic añade un punto (con nombre y color editables; las estaciones del caso ya aparecen con su
+  nombre) con su serie temporal superpuesta a las demás, cada una de un color, y su perfil vertical en el instante
+  actual; botón CSV.
 - **Secciones**: dos clics trazan una sección, o dibuja una línea con la herramienta de línea de la barra del mapa.
   Los extremos de las secciones se pueden **arrastrar** y el corte se actualiza. Los botones **Transversal** y
   **Longitudinal** esperan un clic en el mapa y trazan la sección perpendicular o paralela al eje principal del
-  dominio por ese punto.
+  dominio por ese punto, de borde a borde (llega a la costa o a la pared) y orientada siempre de oeste a este o de
+  sur a norte: la distancia 0 es el extremo oeste o sur. Los extremos se rotulan con su rumbo (O, E, S, N...).
 - El corte vertical muestra la variable con isolíneas y flechas (componente de la velocidad a lo largo del
   corte y velocidad vertical w multiplicada por el «factor w»); el botón Hovmöller dibuja distancia–tiempo.
 - **Animación**: mapa o sección animados en el navegador (cada N instantes) y **Exportar MP4** de la vista
   actual (mapa con flechas o sección), que queda en la carpeta del caso.
 
+### Variables derivadas, componentes y promedios (sin cuaderno)
+
+- **Variables derivadas** en el selector de variable (mapa, puntos, secciones y Hovmöller): `vorticity` (ζ = ∂v/∂x −
+  ∂u/∂y, 1/s, de `depthAverageVel` en 2D o de `horizontalVel` en la capa elegida en 3D), `vorticity_f` (ζ/f, con el f
+  del modelo: lon/lat, plano f con lat0 o plano β), `transport` (transporte por unidad de anchura Tx, Ty = ∫ (u, v) dz,
+  m²/s) y `streamfunction` (función de corriente ψ del transporte, en Sv, con ψ = 0 en el contorno: solo vale en
+  cuencas cerradas sin islas).
+- **Componentes con signo.** En las variables vectoriales el selector *Componente* del mapa elige módulo, u (este) o v
+  (norte); en Puntos, u y v, una de ellas o el módulo; en Secciones y Hovmöller también la componente **normal** a la
+  sección (positiva a la izquierda del avance: hacia el norte en una sección de oeste a este) y la **tangencial**.
+- **Promediar entre t1 y t2.** El interruptor bajo el nivel activa la media de las salidas incluidas entre las dos
+  fechas (AAAA-MM-DD HH:MM; ambas incluidas). Se aplica al mapa, a las secciones, al perfil vertical y a las lecturas de
+  la espiral; en las series se marca la ventana y se da la media de cada serie. El título dice cuántas salidas entran.
+  Con vectores, el módulo es el de la velocidad media; ψ se calcula del transporte medio.
+- **Estaciones en una capa.** Para una variable 3D, la serie de una estación usa el fichero fino `staout` solo en la
+  capa de superficie; en otra capa o a profundidad fija usa las salidas netCDF en ese nivel.
+- **Perfil y hodógrafa (espiral de Ekman)**, en Puntos, para el último punto de la lista: perfil de u, v, |v| y la
+  viscosidad (si se guardó `viscosity`) frente a z; hodógrafa v_E frente a u_E (un punto por nivel, ejes a la misma
+  escala) restando a cada nivel la velocidad de un nivel k o la geostrófica de la pendiente de η (con k-kl el nivel
+  profundo no está fuera de la capa de Ekman); espiral teórica opcional con el V0 y el De que escribas. Lecturas: módulo
+  y ángulo de la corriente de superficie respecto al viento (positivo a la derecha), primera profundidad a la que va en
+  sentido contrario, ajuste de ln|v_E| frente a z en el rango elegido (De y Az = |f| De²/2) y transporte (∫ u_E dz,
+  ∫ v_E dz) en el rango de z elegido (vacío = toda la columna) con su ángulo respecto al viento.
+- **Secciones de variables 2D** (`elevation`, `depthAverageVel`, `transport`, `vorticity`...): se dibujan como una
+  curva a lo largo del corte, con eje Y logarítmico opcional (de |y − referencia|), **ajuste lineal** en un tramo
+  (pendiente α y escala 1/α en km) e **integral** entre dos distancias (con `transport` da m³/s y Sv: el transporte de
+  una corriente). Se indican también los cambios de signo. En una variable 3D, el interruptor **Solo en el nivel del
+  mapa** dibuja la sección en la capa (o la profundidad fija) del mapa como una curva con las mismas herramientas:
+  por ejemplo, v en superficie a lo largo de una sección.
+
 ### Diagnósticos en un cuaderno: transporte, vorticidad y función de corriente
 
-La interfaz no calcula transporte, vorticidad ni función de corriente: son ejercicios de cuaderno. La librería trae
-versiones de referencia para contrastar lo que calcules tú (`schismlab.analysis`):
+Lo anterior también se puede calcular en un cuaderno, para contrastar lo que hagas tú (`schismlab.analysis`):
 
 ```python
 from schismlab.analysis import open_run, vorticity, divergence, transport, streamfunction, curl, stress_pa, ekman_pumping
@@ -258,7 +304,9 @@ Para los puntos del mapa (series del netCDF) o para las **estaciones** (fichero 
 espectro de Welch con banda de confianza del 95 %, espectro **rotatorio** de u+iv (horario y antihorario:
 las oscilaciones inerciales del hemisferio norte son horarias) y **wavelet** de Morlet con el cono de
 influencia sombreado, el contorno de significación al 95 % frente a ruido rojo y el espectro global. Las
-líneas punteadas marcan M2, S2, K1, O1 y el periodo inercial de la latitud. La pestaña indica los periodos
+líneas punteadas marcan M2, S2, K1, O1 y el periodo inercial de la latitud (en los dominios cartesianos, el del
+f del modelo: lat0 en plano f, f0 + βy en plano β). Hay una wavelet por cada punto o estación seleccionado, con el
+color de su serie, para comparar cuándo llega la energía a cada uno. La pestaña indica los periodos
 resolubles (entre 2 veces el intervalo de muestreo y un cuarto del registro): con salidas horarias de dos
 días no hay espectro útil; usa estaciones o registros más largos.
 

@@ -15,7 +15,7 @@ Es la edición de las prácticas de *Oceanografía Física* de la Universitat de
 | **Forzamientos** | Viento uniforme o por fórmula, esfuerzo del viento en Pa, mareas idealizadas, ondas de tsunami y series de nivel en los contornos. |
 | **Ejecutar** | En tu ordenador (Windows con WSL2, Linux o mac). |
 | **Salidas** | Variables de SCHISM, frecuencia, pilas y estaciones elegidas en el mapa. |
-| **Analizar** | Mapas con flechas, series en puntos, secciones, Hovmöller, animaciones y MP4; espectros y wavelets; partículas; comparación de casos; informe HTML; cuaderno con `open_run`. |
+| **Analizar** | Mapas con flechas, series en puntos, secciones, Hovmöller, animaciones y MP4; vorticidad, ζ/f, transporte y función de corriente; componentes con signo; promedios entre dos instantes; perfil y hodógrafa con las lecturas de la espiral de Ekman; ajustes e integrales a lo largo de una sección; espectros y wavelets; partículas; comparación de casos; informe HTML; cuaderno con `open_run`. |
 
 ## Empezar
 

@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 import plotly.graph_objects as go
 from nicegui import run, ui
-from .figures import (LAYOUT, LABELS, label, layout, themed, NodeSampler, _aspect, dataset_range, _values, map_arrows, arrows_trace, profile_figure,
-                      section_figure2, hovmoller_figure, iso_hovmoller_figure, psd_figure, rotary_figure, wavelet_figure, land_polygons, land_traces, boundary_traces)
+from .figures import (LAYOUT, LABELS, label, layout, themed, NodeSampler, _aspect, dataset_range, _values, map_arrows, arrow_field, arrow_units, arrows_trace, profile_figure, profile_figure2,
+                      section_figure2, section_line_figure, hovmoller_figure, iso_hovmoller_figure, psd_figure, rotary_figure, wavelet_figure, land_polygons, land_traces, boundary_traces)
 from ..analysis.sections import Section, preset_section, field_at_depth, is_geographic
 from ..analysis.signal import point_series, psd_welch, rotary_spectrum, wavelet_morlet, reference_periods, regularize, resolvable_periods
 
@@ -22,11 +22,21 @@ SECTION_COLORS = ["#0e9aa7", "#e4572e", "#f3a712", "#a23cff", "#29bf12", "#ff4fa
 
 
 class ExplorerState:
-    def __init__(self, ds, vg):
+    def __init__(self, ds, vg, cfg: dict | None = None):
         from ..analysis.isosurface import add_density
+        from ..analysis.derived import Fields
+        from ..analysis.dynamics import case_coriolis
         add_density(ds)                                    # σt de T y S (perezoso) si no se guardó waterDensity
-        self.ds, self.vg = ds, vg
+        self.ds, self.vg, self.cfg = ds, vg, (cfg or {})
         self.vars = sorted({v[:-1] if v.endswith(("X", "Y")) else v for v in ds.data_vars if "time" in ds[v].dims and not v.startswith("dryFlag")})
+        geo0 = is_geographic(ds)
+        # f del caso (para ζ/f): lon/lat, plano f o plano β; sin rotación no hay ζ/f
+        self.fcor = case_coriolis(self.cfg, ds.x.values, ds.y.values, geo0) if (cfg is not None or geo0) else None
+        self.F = Fields(ds, vg, self.fcor)                 # variables derivadas, componentes y promedios
+        self.vars += [v for v in self.F.available if v not in self.vars]
+        self.mcomp = "mag"                                 # componente del mapa: mag | u | v
+        self.window = None                                 # promedio temporal: índices de las salidas (None = instante)
+        self.on_window = None                              # aviso a otras pestañas (Puntos: perfil y hodógrafa)
         self.var = "elevation" if "elevation" in self.vars else self.vars[0]
         self.it = ds.time.size - 1
         self.nvrt = ds.sizes.get("layer", 1)
@@ -94,15 +104,58 @@ class ExplorerState:
     def context_traces(self) -> list:
         return land_traces(self.land) + (boundary_traces(self.bmesh) if self.bmesh is not None else [])
 
+    def layer_text(self, k: int, t: dict) -> str:
+        """Nombre del nivel k (0 = fondo): el mismo en el deslizador, el título del mapa y Partículas."""
+        if k >= self.nvrt - 1:
+            return t["surface"]
+        if k == 0:
+            return t["bottom_zero"]
+        return f"{t['layer']} {k + 1}"
+
     def is3d(self, var: str) -> bool:
-        ds = self.ds
-        name = var + "X" if var + "X" in ds else var
-        return name in ds and "layer" in ds[name].dims
+        return self.F.is3d(var)
+
+    def is_vector(self, var: str) -> bool:
+        return self.F.is_vector(var)
+
+    def its(self, it: int | None = None) -> list:
+        """Instantes que se usan: los del promedio si está activo; si no, el instante pedido (o el del mapa)."""
+        if self.window is not None and len(self.window):
+            return [int(i) for i in self.window]
+        return [self.it if it is None else int(it)]
+
+    def window_text(self, lang: str = "es") -> str:
+        from ..analysis.derived import describe_window
+        return describe_window(self.ds.time.values, self.window, lang) if self.window is not None else ""
+
+    def signed(self, var: str) -> bool:
+        """Campo con signo (escala centrada en 0): elevación, w, vorticidad, ψ y componentes."""
+        return var in ("elevation", "verticalVelocity", "vorticity", "vorticity_f", "streamfunction") or (self.is_vector(var) and self.mcomp != "mag")
+
+    def value_range(self, var: str):
+        """Rango de colores fijo en toda la simulación (percentiles 1–99 de unos instantes), con derivadas y componentes."""
+        if self.iso_ok(var):
+            return self.iso_range()
+        simple = (not self.F.is_derived(var)) and self.mcomp == "mag" and self.depth_mode == "layer" and self.window is None
+        if simple:
+            return dataset_range(self.ds, var, self.layer)
+        if self.window is not None:
+            a = self.field(var, self.it)
+        else:
+            its = list(range(0, self.ds.time.size, max(1, self.ds.time.size // 6)))
+            a = np.concatenate([self.field(var, i) for i in its])
+        a = np.asarray(a, float); a = a[np.isfinite(a)]
+        if a.size == 0:
+            return None
+        if self.signed(var):
+            m = float(np.nanpercentile(np.abs(a), 99)); return (-m, m) if m > 0 else None
+        lo, hi = float(np.nanpercentile(a, 1)), float(np.nanpercentile(a, 99))
+        return (lo, hi) if hi > lo else None
 
     def iso_ok(self, var: str | None = None) -> bool:
         """True si el modo isosuperficie se aplica: variable 3D escalar."""
         var = self.var if var is None else var
-        return self.depth_mode == "iso" and self.is3d(var) and var + "X" not in self.ds
+        return self.depth_mode == "iso" and var in self.ds and self.is3d(var) and var + "X" not in self.ds
 
     def iso_label(self, lang: str = "es") -> str:
         v = label(self.var, lang).split(" (")[0]
@@ -118,11 +171,16 @@ class ExplorerState:
         return float(np.nanpercentile(a, 1)), float(np.nanpercentile(a, 99))
 
     def field(self, var: str, it: int) -> np.ndarray:
-        """Campo nodal 2D de la variable en el instante: capa, profundidad fija o profundidad de la isosuperficie."""
+        """Campo nodal 2D de la variable en el instante (o media de la ventana): capa, profundidad fija o profundidad de
+        la isosuperficie; variables derivadas y componentes con signo de los vectores."""
         ds = self.ds
         if self.iso_ok(var):
             from ..analysis.isosurface import isosurface_depth
-            return isosurface_depth(ds, var, self.iso_value, it, self.vg).values
+            return np.nanmean([isosurface_depth(ds, var, self.iso_value, i, self.vg).values for i in self.its(it)], axis=0)
+        if self.F.is_derived(var) or self.window is not None or (self.is_vector(var) and self.mcomp != "mag"):
+            depth = self.depth_m if (self.is3d(var) and self.depth_mode == "depth") else None
+            return self.F.nodal(var, self.its(it), layer=self.layer if self.is3d(var) else None, depth=depth,
+                                comp=self.mcomp if self.is_vector(var) else "mag")
         if self.is3d(var) and self.depth_mode == "depth":
             if var + "X" in ds:
                 return np.hypot(field_at_depth(ds, var + "X", it, self.depth_m, self.vg), field_at_depth(ds, var + "Y", it, self.depth_m, self.vg))
@@ -150,6 +208,27 @@ class ExplorerState:
                  color=SECTION_COLORS[len(self.sections) % len(SECTION_COLORS)], visible=True)
         s["sec"] = Section(self.ds, s["p0"], s["p1"], vg=self.vg, tri=self.tri)
         self.sections.append(s); return s
+
+
+DERIVED_NAMES = {"es": {"vorticity": "vorticity (ζ)", "vorticity_f": "vorticity / f (ζ/f)", "transport": "transport (Tx, Ty)",
+                         "streamfunction": "streamfunction (ψ, Sv; cuencas cerradas)"},
+                  "en": {"vorticity": "vorticity (ζ)", "vorticity_f": "vorticity / f (ζ/f)", "transport": "transport (Tx, Ty)",
+                         "streamfunction": "streamfunction (ψ, Sv; closed basins)"}}
+
+
+def var_name(v: str, lang: str = "es") -> str:
+    """Nombre en los selectores: el de SCHISM o, para las derivadas, con su símbolo."""
+    return DERIVED_NAMES.get(lang, DERIVED_NAMES["es"]).get(v, v)
+
+
+def nearest_output(times, text) -> int | None:
+    """Índice de la salida más próxima a una fecha escrita («2020-01-10 06:00», «2020-01-10T06», «2020-01-10»)."""
+    try:
+        t = np.datetime64(str(text).strip().replace(" ", "T"), "s")
+    except (ValueError, TypeError):
+        return None
+    tt = np.asarray(times).astype("datetime64[s]")
+    return int(np.argmin(np.abs((tt - t).astype("int64"))))
 
 
 def default_cmap(var: str) -> str:
@@ -209,20 +288,21 @@ def map_figure(st: ExplorerState, t: dict, lang: str):
         if st.zmanual is not None:
             zmin, zmax = st.zmanual
         cs = "deep" if st.cmap == "auto" else st.cmap
-        title = f"{label_} · {when}"
+        title = f"{label_} · {st.window_text(lang) if st.window is not None else when}"
     else:
-        f = st.field(var, it); Z = st.sampler.grid(f); label_ = label(var, lang)
-        sym = var == "elevation"
+        f = st.field(var, it); Z = st.sampler.grid(f); label_ = label(var, lang, st.mcomp if st.is_vector(var) else "mag")
+        sym = st.signed(var)
         zmin, zmax = (st.zr if (st.fixed and st.zr) else (None, None))
         if st.zmanual is not None:
             zmin, zmax = st.zmanual
         elif sym and zmin is None and np.isfinite(Z).any():
             m = float(np.nanmax(np.abs(Z))); zmin, zmax = -m, m
-        cs = default_cmap(var) if st.cmap == "auto" else st.cmap
-        lvl = (f"{st.depth_m:g} m" if st.depth_mode == "depth" else (t["surface"] if st.layer == st.nvrt - 1 else f"{t['layer']} {st.layer + 1}")) if st.is3d(var) else ""
-        title = f"{label_} · {when}" + (f" · {lvl}" if lvl else "")
+        cs = ("RdBu_r" if sym else default_cmap(var)) if st.cmap == "auto" else st.cmap
+        lvl = (f"{st.depth_m:g} m" if st.depth_mode == "depth" else st.layer_text(st.layer, t)) if st.is3d(var) else ""
+        title = f"{label_} · {st.window_text(lang) if st.window is not None else when}" + (f" · {lvl}" if lvl else "")
     fig = go.Figure(go.Heatmap(x=st.sampler.xi, y=st.sampler.yi, z=Z, colorscale=cs, zmin=zmin, zmax=zmax, zsmooth="best",
-                               colorbar=dict(title=label_, thickness=14, tickformat=".3g"), hovertemplate="%{x:.4f}, %{y:.4f}<br>%{z:.3f}<extra></extra>"))
+                               colorbar=dict(title=label_, thickness=14, tickformat=".3g"),
+                               hovertemplate=("%{x:.4f}, %{y:.4f}" if st.geo else "x %{x:.0f} m, y %{y:.0f} m") + "<br>%{z:.4g}<extra></extra>"))
     C = st.contour_grid(it)
     st._frame = dict(z=Z, zmin=zmin, zmax=zmax, title=title, C=C)   # para la vía rápida (Plotly 6 codifica z en binario)
     ctr = contour_trace(C, st.sampler.xi, st.sampler.yi, st.contour_step, st.dark) if C is not None else None
@@ -238,13 +318,26 @@ def map_figure(st: ExplorerState, t: dict, lang: str):
         if step > 1:
             fig.add_annotation(x=0.01, y=0.02, xref="paper", yref="paper", showarrow=False, xanchor="left", font=dict(size=10, color="#333"), bgcolor="rgba(255,255,255,0.7)",
                                text=(f"malla: 1 de cada {step} aristas" if lang == "es" else f"mesh: 1 in {step} edges"))
-    if st.arrows and ("horizontalVelX" in ds or "depthAverageVelX" in ds):
+    if st.arrows and (arrow_field(ds, var) or st.is_vector(var)):
         try:
-            tr, vmax = map_arrows(ds, it, st.layer, depth_m=st.depth_m if st.depth_mode == "depth" else None, vg=st.vg)
+            aname = var if st.is_vector(var) else arrow_field(ds, var)
+            uv = None
+            if st.window is not None or st.F.is_derived(var):            # media de la ventana o transporte: u, v del propio campo
+                avar = var if st.is_vector(var) else aname
+                dep = st.depth_m if (st.depth_mode == "depth" and st.is3d(avar)) else None
+                lay = st.layer if st.is3d(avar) else None
+                uv = (st.F.nodal(avar, st.its(it), layer=lay, depth=dep, comp="u"), st.F.nodal(avar, st.its(it), layer=lay, depth=dep, comp="v"))
+                aname = avar
+            tr, vmax = map_arrows(ds, it, st.layer, depth_m=st.depth_m if st.depth_mode == "depth" else None, vg=st.vg, var=var, uv=uv)
             fig.add_trace(tr)
-            fig.add_annotation(x=0.99, y=0.02, xref="paper", yref="paper", showarrow=False, xanchor="right", text=f"|u| máx {vmax:.2f} m/s" if lang == "es" else f"|u| max {vmax:.2f} m/s",
+            lvl_a = ""
+            if st.is3d(aname):
+                lvl_a = f" ({st.depth_m:g} m)" if st.depth_mode == "depth" else f" ({st.layer_text(st.layer, t)})"
+            what = ("flechas: " if lang == "es" else "arrows: ") + aname + lvl_a
+            fig.add_annotation(x=0.99, y=0.02, xref="paper", yref="paper", showarrow=False, xanchor="right",
+                               text=f"{what} · {'máx' if lang == 'es' else 'max'} {vmax:.3g} {arrow_units(aname)}",
                                font=dict(size=10), bgcolor="rgba(255,255,255,0.7)")
-        except Exception:   # sin velocidades en esa capa
+        except Exception:   # noqa: BLE001  (sin ese campo en esa capa)
             pass
     for tr in st.context_traces():
         fig.add_trace(tr)
@@ -306,13 +399,18 @@ def series_figure_multi(st: ExplorerState, var: str, lang: str, wd: Path | None 
         comp = getattr(st, "component", "uv")
         dash = {"u": "solid", "v": "dash", "mag": "dot"}
         vector = False
+        # estaciones: staout (muestreo fino) solo para variables 2D o en la capa de superficie; en otra capa, a una
+        # profundidad fija o para las derivadas, la serie sale del netCDF en el nivel elegido
+        surface = st.depth_mode == "layer" and st.layer >= st.nvrt - 1
+        use_sta = (not st.F.is_derived(var)) and (not st.is3d(var) or surface)
+        depth = st.depth_m if (st.is3d(var) and st.depth_mode == "depth") else None
         for p in st.points:
-            sta = station_series(wd, var, p["name"]) if p.get("station") else None
+            sta = station_series(wd, var, p["name"]) if (p.get("station") and use_sta) else None
             if sta is not None:
                 t_, y = sta; used_sta = True; suffix = " (staout)"
                 comps = y if isinstance(y, dict) else None
             else:
-                s = point_series(st.ds, var, p["node"], st.layer); t_ = s["t"]; suffix = ""
+                s = st.F.series(var, p["node"], layer=st.layer if st.is3d(var) else None, depth=depth); t_ = s["t"]; suffix = ""
                 comps = {"u": s["u"], "v": s["v"]} if "u" in s else None
                 y = s.get("y")
             if comps is None:
@@ -334,7 +432,26 @@ def series_figure_multi(st: ExplorerState, var: str, lang: str, wd: Path | None 
             fig.add_hline(y=0, line=dict(color="#999", width=1))
         if used_sta:
             fig.add_annotation(x=0.01, y=0.98, xref="paper", yref="paper", showarrow=False, xanchor="left", font=dict(size=10, color="#555"),
-                               text="estaciones: serie fina de staout (en superficie)" if lang == "es" else "stations: fine staout series (surface)")
+                               text=("estaciones: serie fina de staout" + (" (serie de superficie)" if st.is3d(var) else "")) if lang == "es"
+                               else ("stations: fine staout series" + (" (surface series)" if st.is3d(var) else "")))
+    if st.window is not None and len(st.window) and lines:              # promedio entre t1 y t2: banda y media de cada serie
+        tt = np.asarray(st.ds.time.values); a, b = tt[st.window[0]], tt[st.window[-1]]
+        fig.add_vrect(x0=a, x1=b, fillcolor="rgba(120,120,120,0.12)", line_width=0)
+        notes = []
+        for (t_, y_, col), tr in zip(lines, [d for d in fig.data]):
+            t_ = np.asarray(t_); m = (t_ >= a) & (t_ <= b)
+            if m.any():
+                mu = float(np.nanmean(np.asarray(y_, float)[m]))
+                fig.add_trace(go.Scatter(x=[a, b], y=[mu, mu], mode="lines", line=dict(color=col, width=2, dash="dot"), showlegend=False,
+                                         hovertemplate=f"{tr.name}: {'media' if lang == 'es' else 'mean'} %{{y:.4g}}<extra></extra>"))
+                notes.append(f"{tr.name} {mu:.4g}")
+        lines_mean = len(notes)
+        if notes:
+            fig.update_layout(title=dict(text=("media " if lang == "es" else "mean ") + st.window_text(lang).split("(", 1)[-1].rstrip(")") + ": " + " · ".join(notes),
+                                         font=dict(size=11)))
+        st._mean_traces = lines_mean
+    else:
+        st._mean_traces = 0
     st.series_lines = lines
     shapes0 = list(fig.layout.shapes or []); fig.layout.shapes = ()
     xs, ys, tc = series_cursor(st)
@@ -346,6 +463,169 @@ def series_figure_multi(st: ExplorerState, var: str, lang: str, wd: Path | None 
     for sh in shapes0:
         fig.add_shape(sh)
     return fig
+
+
+def section_values(st: ExplorerState, s: dict, var: str, its, comp: str = "mag", layer: int | None = None):
+    """Valores de `var` en la sección (media de los instantes `its`): (F, z, vel). F es (npts, nvrt) en las variables
+    3D y (npts,) en las 2D (o en la capa `layer` si se pide). comp: mag | u | v | normal | tangential (vectores).
+    vel = (u_s, w) medios para las flechas, o None."""
+    sec = s["sec"]; F_ = st.F
+    its = [int(i) for i in np.atleast_1d(its)]
+    if F_.is_vector(var) and comp != "mag":
+        u, v = F_.columns(var, its, "uv")
+        ui_, vi_ = sec.interp(u), sec.interp(v)
+        F = {"u": ui_, "v": vi_, "normal": ui_ * sec.normal[0] + vi_ * sec.normal[1],
+             "tangential": ui_ * sec.tangent[0] + vi_ * sec.tangent[1]}.get(comp, np.hypot(ui_, vi_))
+    elif var == "streamfunction":
+        F = sec.interp(F_.nodal(var, its))
+    else:
+        F = sec.interp(F_.columns(var, its, "mag"))
+    if F.ndim == 2 and layer is not None:
+        F = F[:, int(layer)]
+    z = vel = None
+    if F.ndim == 2:
+        z = sec.interp(F_.mean_z(its)) if len(its) > 1 else sec.z(its[0])
+        if len(its) > 1 and F_.velocity_name():
+            u, v = F_.columns(F_.velocity_name(), its, "uv")
+            us = sec.interp(u) * sec.tangent[0] + sec.interp(v) * sec.tangent[1]
+            w = sec.interp(np.nanmean([_clean_w(st.ds, i) for i in its], axis=0)) if "verticalVelocity" in st.ds else None
+            if us.ndim == 2:
+                vel = (us, w)
+    return F, z, vel
+
+
+def _clean_w(ds, it):
+    a = np.asarray(ds.verticalVelocity.isel(time=it).values, float)
+    return np.where(a < -9000, np.nan, a)
+
+
+def section_hovmoller(st: ExplorerState, s: dict, var: str, comp: str = "mag") -> np.ndarray:
+    """H (tiempo, distancia) de `var` (componente, derivada o 2D) en la capa del mapa o a la profundidad fija."""
+    rows = []
+    for i in range(st.ds.time.size):
+        if st.is3d(var) and st.depth_mode == "depth":
+            F, z, _ = section_values(st, s, var, [i], comp)
+            from ..analysis.sections import interp_at_depth
+            rows.append(interp_at_depth(F, z, st.depth_m))
+        else:
+            F, _, _ = section_values(st, s, var, [i], comp, layer=st.layer if st.is3d(var) else None)
+            rows.append(F)
+    return np.stack(rows)
+
+
+def ekman_profile(st: ExplorerState, node: int, its, ref_mode: str = "level", k: int = 7, fit=(-28.0, 0.0), integ=None, lang: str = "es") -> dict:
+    """Perfil medio (z, u, v, viscosidad) en el nodo y lecturas de la espiral: resta la velocidad del nivel k o la
+    geostrófica de la pendiente de η (necesaria con k-kl, donde el nivel profundo no está fuera de la capa de Ekman)."""
+    from ..analysis.profiles import ekman_readouts, geostrophic
+    ds = st.ds; its = [int(i) for i in np.atleast_1d(its)]
+    u, v = st.F.columns("horizontalVel", its, "uv")
+    u, v = u[node], v[node]
+    z = (st.F.mean_z(its) if len(its) > 1 else st.F.zcor(its[0]))[node]
+    f = float(st.fcor[node]) if st.fcor is not None else None
+    wind = None
+    if "windStressX" in ds:
+        wind = (float(np.nanmean(ds.windStressX.isel(node=node, time=its).values)), float(np.nanmean(ds.windStressY.isel(node=node, time=its).values)))
+    ref = None; ref_txt = ""
+    if ref_mode == "level":
+        kk = int(np.clip(k, 0, len(z) - 1)); ref = (float(u[kk]), float(v[kk])); ref_txt = f"{'nivel' if lang == 'es' else 'level'} {kk} (z = {z[kk]:.1f} m)"
+    elif ref_mode == "geo":
+        if f is None or "elevation" not in ds:
+            raise ValueError("la geostrófica necesita Coriolis y la elevación / geostrophic velocity needs Coriolis and elevation")
+        ref = geostrophic(ds, node, its, f); ref_txt = "geostrófica de η" if lang == "es" else "geostrophic from η"
+    r = ekman_readouts(z, u, v, wind=wind, ref=ref, fit=fit, integ=integ, f=f)
+    visc = None
+    if "viscosity" in ds:
+        a = np.asarray(ds.viscosity.isel(node=node, time=its).values, float)
+        visc = np.nanmean(np.where(a < -9000, np.nan, a), axis=0) if a.ndim == 2 else a
+    return dict(r, u=u, v=v, zraw=z, visc=visc, wind=wind, f=f, ref=ref, ref_txt=ref_txt, n=len(its))
+
+
+def ekman_figures(d: dict, lang: str = "es", theory=None):
+    """(perfil, hodógrafa): u, v, |v| (y viscosidad en otro eje) frente a z; v_E frente a u_E con la misma escala."""
+    from plotly.subplots import make_subplots
+    es = lang == "es"
+    has_v = d.get("visc") is not None
+    pf = make_subplots(rows=1, cols=2 if has_v else 1, shared_yaxes=True, column_widths=[0.62, 0.38] if has_v else None, horizontal_spacing=0.04)
+    z = d["zraw"]; u, v = d["u"], d["v"]
+    pf.add_trace(go.Scatter(x=u, y=z, mode="lines+markers", name="u", marker=dict(size=4)), 1, 1)
+    pf.add_trace(go.Scatter(x=v, y=z, mode="lines+markers", name="v", line=dict(dash="dash"), marker=dict(size=4)), 1, 1)
+    pf.add_trace(go.Scatter(x=np.hypot(u, v), y=z, mode="lines", name="|v|", line=dict(dash="dot", color="#888")), 1, 1)
+    pf.update_xaxes(title_text="u (este), v (norte), |v| (m/s)" if es else "u (east), v (north), |v| (m/s)", row=1, col=1)
+    if has_v:
+        pf.add_trace(go.Scatter(x=d["visc"], y=z, mode="lines+markers", name="viscosity", line=dict(color="#7a4fb8"), marker=dict(size=4)), 1, 2)
+        vm = float(np.nanmax(d["visc"])) if np.isfinite(d["visc"]).any() else 0.0
+        pf.update_xaxes(title_text="viscosidad (m²/s)" if es else "viscosity (m²/s)", row=1, col=2,
+                        range=[0, vm * 1.15] if vm > 0 else None, tickformat=".2g")
+    pf.update_yaxes(title_text="z (m)", row=1, col=1)
+    pf.update_layout(**LAYOUT)
+    pf.update_layout(legend=dict(orientation="h", x=0, y=1.0, yanchor="bottom"), margin=dict(l=50, r=20, t=70, b=50))
+    hf = go.Figure()
+    uE, vE = d["uE"], d["vE"]
+    hf.add_trace(go.Scatter(x=uE, y=vE, mode="lines+markers", name="modelo" if es else "model", marker=dict(size=5),
+                            text=[f"z = {zz:.1f} m" for zz in d["z"]], hovertemplate="%{text}<br>u_E %{x:.4f}<br>v_E %{y:.4f}<extra></extra>"))
+    if theory is not None and theory[0] > 0 and theory[1] > 0:
+        from ..analysis.profiles import theoretical_spiral
+        wd_ = d["wind"] if d.get("wind") and np.hypot(*d["wind"]) > 0 else (1.0, 0.0)
+        zt, ut, vt = theoretical_spiral(theory[0], theory[1], d.get("f") or 1.0, wind_dir=wd_, zmin=float(np.nanmin(d["z"])))
+        hf.add_trace(go.Scatter(x=ut, y=vt, mode="lines", name="teoría" if es else "theory", line=dict(color="#111", dash="dash")))
+    if d.get("wind") and np.hypot(*d["wind"]) > 0:
+        w = np.asarray(d["wind"], float); L = float(np.nanmax(np.hypot(uE, vE)) or 1.0) * 0.6; w = w / np.hypot(*w) * L
+        hf.add_annotation(x=w[0], y=w[1], ax=0, ay=0, xref="x", yref="y", axref="x", ayref="y", showarrow=True, arrowhead=2, arrowcolor="#d8542b", text="")
+        hf.add_annotation(x=w[0], y=w[1], xref="x", yref="y", showarrow=False, text="viento" if es else "wind", font=dict(color="#d8542b"),
+                          xanchor="left" if w[0] >= 0 else "right", yanchor="bottom")
+    hf.add_hline(y=0, line=dict(color="#999", width=1)); hf.add_vline(x=0, line=dict(color="#999", width=1))
+    hf.update_layout(xaxis=dict(title="u_E (m/s)", zeroline=False), yaxis=dict(title="v_E (m/s)", scaleanchor="x", scaleratio=1, zeroline=False),
+                     title=dict(text=("hodógrafa (un punto por nivel)" if es else "hodograph (one point per level)") +
+                                (f" · {'restando' if es else 'minus'} {d['ref_txt']}" if d.get("ref_txt") else ""), font=dict(size=12)),
+                     **LAYOUT)
+    hf.update_layout(legend=dict(orientation="h", x=0, y=1.0, yanchor="bottom"), margin=dict(l=60, r=20, t=70, b=50))
+    return pf, hf
+
+
+def ekman_text(d: dict, lang: str = "es") -> str:
+    """Lecturas automáticas de la espiral, en una caja de texto."""
+    es = lang == "es"; L = []
+    L.append((f"Promedio de {d['n']} salida{'s' if d['n'] != 1 else ''}" if es else f"Mean of {d['n']} output{'s' if d['n'] != 1 else ''}")
+             + (f" · {'restando' if es else 'minus'} {d['ref_txt']}" if d.get("ref_txt") else ""))
+    s = f"|v_E(0)| = {d['surface']:.4g} m/s"
+    if d.get("surface_angle") is not None:
+        s += (f", a {d['surface_angle']:.1f}° a la derecha del viento" if es else f", {d['surface_angle']:.1f}° to the right of the wind")
+    L.append(("Corriente en superficie: " if es else "Surface current: ") + s)
+    if d.get("z_reverse") is not None:
+        L.append((f"Va en sentido contrario a la de superficie a {abs(d['z_reverse']):.1f} m" if es else f"Opposite to the surface current at {abs(d['z_reverse']):.1f} m"))
+    if d.get("De"):
+        az = f" → Az = |f| De²/2 = {d['Az']:.4g} m²/s" if d.get("Az") else ""
+        L.append((f"Ajuste de ln|v_E| ({d['n_fit']} niveles): De = {d['De']:.3g} m, V0 = {d['V0_fit']:.4g} m/s{az}" if es
+                  else f"Fit of ln|v_E| ({d['n_fit']} levels): De = {d['De']:.3g} m, V0 = {d['V0_fit']:.4g} m/s{az}"))
+    if d.get("Tx") is not None:
+        a = (f", a {d['T_angle']:.1f}° a la derecha del viento" if es else f", {d['T_angle']:.1f}° to the right of the wind") if d.get("T_angle") is not None else ""
+        L.append((f"Transporte (∫ u_E dz, ∫ v_E dz): Tx = {d['Tx']:.4g} m²/s, Ty = {d['Ty']:.4g} m²/s{a}" if es
+                  else f"Transport (∫ u_E dz, ∫ v_E dz): Tx = {d['Tx']:.4g} m²/s, Ty = {d['Ty']:.4g} m²/s{a}"))
+    return "\n".join(L)
+
+
+VECTOR_UNITS = {"horizontalVel": "m/s", "depthAverageVel": "m/s", "windStress": "m²/s²", "transport": "m²/s", "windSpeed": "m/s"}
+
+
+def line_readout(info: dict, units: str, lang: str = "es") -> str:
+    """Texto de las lecturas del perfil a lo largo de la sección: ajuste (α, 1/α), integral y cruces por cero."""
+    es = lang == "es"; out = []
+    r = info.get("fit")
+    if r:
+        kind = "ln|y − ref|" if r["log"] else "y − ref"
+        sc = f"{r['scale_km']:.4g} km" if r.get("scale_km") is not None else "∞"
+        out.append((f"Ajuste de {kind} entre {r['x0_km']:g} y {r['x1_km']:g} km ({r['n']} puntos): pendiente α = {r['alpha']:.4g} 1/m · 1/α = {sc}")
+                   if es else (f"Fit of {kind} between {r['x0_km']:g} and {r['x1_km']:g} km ({r['n']} points): slope α = {r['alpha']:.4g} 1/m · 1/α = {sc}"))
+    elif "fit" in info:
+        out.append("Ajuste: no hay datos en ese tramo" if es else "Fit: no data in that range")
+    if info.get("integral") is not None:
+        I = info["integral"]; u = info.get("integral_units", "")
+        extra = f" = {I / 1e6:.4g} Sv" if u == "m³/s" else ""
+        out.append((f"Integral a lo largo de la sección: {I:.4g} {u}{extra}") if es else (f"Integral along the section: {I:.4g} {u}{extra}"))
+    if info.get("zeros"):
+        z = ", ".join(f"{x:.1f}" for x in info["zeros"][:6])
+        out.append((f"Cambios de signo en: {z} km") if es else (f"Sign changes at: {z} km"))
+    return "\n".join(out)
 
 
 def series_cursor(st: ExplorerState):
@@ -364,14 +644,14 @@ def series_cursor(st: ExplorerState):
 def animation_figure2(st: ExplorerState, t: dict, lang: str, step: int = 1, progress=None) -> go.Figure:
     """Animación del mapa (mapa de calor + flechas en cada fotograma, escala fija)."""
     ds = st.ds; var = st.var
-    zr = st.zr or dataset_range(ds, var, st.layer)
+    zr = st.zr or st.value_range(var) or dataset_range(ds, "elevation", -1)
     frames = []
     its = list(range(0, ds.time.size, step))
     for k, it in enumerate(its):
         Z = st.sampler.grid(st.field(var, it))
         data = [go.Heatmap(x=st.sampler.xi, y=st.sampler.yi, z=Z, colorscale="RdBu_r" if var == "elevation" else ("RdYlBu_r" if var == "temperature" else "Viridis"), zmin=zr[0], zmax=zr[1], zsmooth="best")]
-        if st.arrows and ("horizontalVelX" in ds or "depthAverageVelX" in ds):
-            data.append(map_arrows(ds, it, st.layer, depth_m=st.depth_m if st.depth_mode == "depth" else None, vg=st.vg)[0])
+        if st.arrows and arrow_field(ds, var):
+            data.append(map_arrows(ds, it, st.layer, depth_m=st.depth_m if st.depth_mode == "depth" else None, vg=st.vg, var=var)[0])
         data += st.context_traces()
         frames.append(go.Frame(data=data, name=str(it), layout=go.Layout(title=np.datetime_as_string(ds.time.values[it], "m").replace("T", " "))))
         if progress:
@@ -390,11 +670,13 @@ def section_animation(st: ExplorerState, s: dict, var: str, lang: str, step: int
     sec = s["sec"]
     its = list(range(0, st.ds.time.size, step))
     # rango fijo de colores en toda la animación
-    vals = [sec.scalar(var, it) for it in its[:: max(1, len(its) // 6)]]
+    comp = getattr(st, "sec_comp", "mag") if st.is_vector(var) else "mag"
+    vals = [section_values(st, s, var, [it], comp)[0] for it in its[:: max(1, len(its) // 6)]]
     zr = (float(np.nanmin([np.nanmin(v) for v in vals])), float(np.nanmax([np.nanmax(v) for v in vals])))
     frames = []
     for k, it in enumerate(its):
-        f = section_figure2(sec, var, it, arrows=st.arrows, contours=False, zrange=zr, lang=lang)
+        F, z, _ = section_values(st, s, var, [it], comp)
+        f = section_figure2(sec, var, it, arrows=st.arrows, contours=False, zrange=zr, lang=lang, F=F, z=z, clabel=label(var, lang, comp))
         frames.append(go.Frame(data=f.data, name=str(it), layout=go.Layout(title=np.datetime_as_string(st.ds.time.values[it], "m").replace("T", " "))))
         if progress:
             progress((k + 1) / len(its))
@@ -411,7 +693,7 @@ def section_animation(st: ExplorerState, s: dict, var: str, lang: str, step: int
 
 # ----------------------------------------------------------------------------- pestaña Mapas y series
 def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = False) -> ExplorerState:
-    st = ExplorerState(ds, vg); st.dark = bool(dark)
+    st = ExplorerState(ds, vg, c); st.dark = bool(dark)
     st.load_context(c, wd)
     st.zr = dataset_range(ds, st.var, st.layer)
     if not (c.get("stations") or []):                            # sin estaciones: un punto inicial en el centro
@@ -421,21 +703,31 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         if x_ is not None and y_ is not None:
             st.add_point(float(x_), float(y_), str(s_.get("name", f"E{len(st.points)}")), station=True)
     initial_points = [dict(p) for p in st.points]                # para poder recuperar las estaciones borradas
-    has_vel = "horizontalVelX" in ds or "depthAverageVelX" in ds
+    has_vel = any(v + "X" in ds for v in st.vars)                 # flechas: la velocidad o la variable vectorial elegida
     # --- controles: encima del mapa solo variable, capa y tiempo; el estilo va en un acordeón plegado bajo el mapa
     def layer_text(k: int) -> str:
-        return t["surface"] if k >= st.nvrt - 1 else (t["bottom"] if k == 0 else f"{t['layer']} {k + 1}")
+        return st.layer_text(k, t)
     iso_opts = {"": t["iso_none"], "depth": label("depth", lang).split(" (")[0], **{v: v for v in st.vars}}
     with ui.row().classes("w-full items-start").style("gap:16px;flex-wrap:wrap"):
         # ------------------------------------------------------------------ controles (columna izquierda)
         with ui.card().classes("q-pa-md").style("flex:0 0 300px;max-width:100%"):
             ui.label(t["m_color"]).classes("text-subtitle2")
-            var = ui.select(st.vars, value=st.var, label=t["variable"]).classes("w-full").mark("var_select")
+            var = ui.select({v: var_name(v, lang) for v in st.vars}, value=st.var, label=t["variable"]).classes("w-full").mark("var_select")
+            mcomp = ui.select({"mag": t["comp_mag"], "u": t["comp_u"], "v": t["comp_v"]}, value="mag", label=t["component"]) \
+                .classes("w-full").mark("map_component")
             dmode = ui.select({"layer": t["by_layer"], "depth": t["by_depth"], "iso": t["by_iso"]}, value="layer", label=t["level"]).classes("w-full")
             with ui.column().classes("w-full q-pt-md") as lsl_box:
-                lsl = ui.slider(min=0, max=max(0, st.nvrt - 1), value=st.layer).props(f'label-always label-value="{layer_text(st.layer)}"').classes("w-full")
+                lsl = ui.slider(min=0, max=max(0, st.nvrt - 1), value=st.layer).props(f'label-always label-value="{layer_text(st.layer)}"').classes("w-full").mark("layer_slider")
             ldep = ui.number(t["depth_fixed"], value=st.depth_m, min=0, step=5).classes("w-full")
             ival = ui.number(t["iso_value"], value=st.iso_value, step=0.5).classes("w-full").mark("iso_value")
+            # promedio temporal: la media de las salidas entre t1 y t2 en el mapa, las secciones, los perfiles y las lecturas
+            _t0 = np.datetime_as_string(ds.time.values[0], "m").replace("T", " "); _t1 = np.datetime_as_string(ds.time.values[-1], "m").replace("T", " ")
+            avg_sw = ui.switch(t["avg_window"], value=False).mark("avg_switch")
+            with ui.column().classes("w-full q-gutter-xs") as avg_box:
+                avg_a = ui.input(t["avg_from"], value=_t0).props("dense outlined").classes("w-full").mark("avg_from")
+                avg_b = ui.input(t["avg_to"], value=_t1).props("dense outlined").classes("w-full").mark("avg_to")
+                avg_n = ui.label().classes("text-caption text-grey-7")
+            avg_box.set_visibility(False)
             with ui.expansion(t["map_style"], icon="palette", value=True).classes("sl-exp w-full q-mt-sm"):
                 bg = ui.select({"field": t["bg_field"], "resolution": t["bg_resolution"], "depth": t["bg_depth"]}, value="field", label=t["background"]).classes("w-full")
                 iso_sel = ui.select(iso_opts, value="", label=t["isolines"]).classes("w-full").mark("isolines_select")
@@ -455,14 +747,15 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
                 with ui.element("div"):                              # el relleno de la fila no entra en el botón
                     play = ui.button(icon="play_arrow").props("round dense color=accent").mark("play_button")
                 tsl = ui.slider(min=0, max=ds.time.size - 1, value=st.it).classes("col").mark("time_slider")
-                tlabel = ui.label().classes("text-caption text-no-wrap")
+                tlabel = ui.input(t["goto_time"]).props("dense outlined").classes("sl-w-md").style("min-width:11.5rem").mark("time_input") \
+                    .tooltip(t["goto_time_tip"])
             _ratio = float(np.ptp(ds.y.values) * _aspect(ds.y.values) / max(np.ptp(ds.x.values), 1e-12))
             _h = int(min(720, max(440, 220 + 620 * _ratio)))                 # alto según la forma del dominio
             plot = ui.plotly(themed(map_figure(st, t, lang), st.dark)).classes("w-full").style(f"height:{_h}px").mark("map_plot")
             st.plot = plot
 
     # --- paneles inferiores
-    with rcol, ui.tabs().classes("w-full").props("dense no-caps mobile-arrows") as subtabs:   # debajo del mapa: se traza y se ve a la vez
+    with rcol, ui.tabs().classes("w-full").props("dense no-caps mobile-arrows").mark("explorer_subtabs") as subtabs:   # debajo del mapa: se traza y se ve a la vez
         tp = ui.tab("tab_points", label=t["points"]); tsec = ui.tab("tab_sections", label=t["sections"]); tan = ui.tab("tab_anim", label=t["animate"])
     with rcol:
         panels = ui.tab_panels(subtabs, value=tp).classes("w-full")
@@ -473,10 +766,33 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
                 st.component = "uv"
                 comp_sel = ui.select({"uv": t["comp_uv"], "u": t["comp_u"], "v": t["comp_v"], "mag": t["comp_mag"]}, value="uv",
                                      label=t["component"]).props("dense").classes("sl-w-md").mark("component_select")
-                sfig = ui.plotly(series_figure_multi(st, st.var, lang, wd)).classes("w-full").style("height:320px")
+                sfig = ui.plotly(series_figure_multi(st, st.var, lang, wd)).classes("w-full").style("height:320px").mark("series_plot")
                 pfig = ui.plotly(go.Figure()).classes("w-full").style("height:300px")
         with ui.row().classes("q-gutter-sm"):
             ui.button(t["download_series"], icon="download", on_click=lambda: export_series()).props("flat dense")
+        # --- perfil y hodógrafa (espiral de Ekman) del último punto, en el instante o en la ventana de promedio
+        has_3dvel = "horizontalVelX" in ds and st.nvrt > 2
+        with ui.expansion(t["ek_title"], icon="cyclone", value=False).classes("sl-exp w-full q-mt-sm").mark("ekman_panel") as ek_exp:
+            ui.label(t["ek_hint"]).classes("text-caption text-grey-7")
+            with ui.row().classes("row wrap q-col-gutter-sm items-center"):
+                ek_ref = ui.select({"none": t["ek_ref_none"], "level": t["ek_ref_level"], "geo": t["ek_ref_geo"]}, value="level",
+                                   label=t["ek_ref"]).classes("sl-w-lg").mark("ek_ref")
+                ek_k = ui.number(t["ek_level"], value=min(7, max(0, st.nvrt - 1)), min=0, max=max(0, st.nvrt - 1), step=1, format="%d") \
+                    .props("dense").classes("sl-w-sm").mark("ek_level")
+                ek_f1 = ui.number(t["ek_fit_from"], value=-28.0, format="%g").props("dense").classes("sl-w-sm").mark("ek_fit_from")
+                ek_f2 = ui.number(t["ek_fit_to"], value=0.0, format="%g").props("dense").classes("sl-w-sm").mark("ek_fit_to")
+                ek_i1 = ui.number(t["ek_int_from"], value=None, format="%g").props("dense clearable").classes("sl-w-sm").mark("ek_int_from")
+                ek_i2 = ui.number(t["ek_int_to"], value=None, format="%g").props("dense clearable").classes("sl-w-sm").mark("ek_int_to")
+            with ui.row().classes("row wrap q-col-gutter-sm items-center"):
+                ek_th = ui.switch(t["ek_theory"], value=False).mark("ek_theory")
+                ek_v0 = ui.number("V0 (m/s)", value=0.2, format="%g", step=0.01).props("dense").classes("sl-w-sm").mark("ek_V0")
+                ek_de = ui.number("De (m)", value=14.0, format="%g", step=1).props("dense").classes("sl-w-sm").mark("ek_De")
+                ui.button(t["ek_update"], icon="refresh", on_click=lambda: refresh_ekman()).props("flat dense")
+            ek_info = ui.label().classes("text-body2 text-weight-medium").style("white-space:pre-line").mark("ek_readout")
+            # las figuras se crean al abrir el panel: Plotly toma el ancho del contenedor al dibujar (cerrado, sería 0)
+            ek_figbox = ui.row().classes("w-full no-wrap items-start").style("gap:12px;flex-wrap:wrap")
+            ek_figs = {}
+        ek_exp.set_visibility(has_3dvel)
     with panels, ui.tab_panel(tsec):
         with ui.row().classes("w-full items-start"):
             slist = ui.column().classes("col-12 col-md-4 q-gutter-xs")
@@ -488,12 +804,25 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
                         armed["mode"] = mode; st.pending = None; st.click_mode = "armed"; refresh_map(); ui.notify(t["sec_click_wait"], timeout=2500)
                     ui.button(t["sec_transversal"], icon="swap_vert", on_click=lambda: arm("transversal")).props("outline dense color=primary").mark("sec_transversal")
                     ui.button(t["sec_longitudinal"], icon="swap_horiz", on_click=lambda: arm("longitudinal")).props("outline dense color=primary")
-                    sec_vars = [v for v in st.vars if st.is3d(v)] or list(st.vars)        # en 2D: cualquier variable (perfil a lo largo del corte)
-                    svar = ui.select(sec_vars, value=st.var if st.var in sec_vars else sec_vars[0], label=t["variable"]).classes("sl-w-md")
+                    sec_vars = list(st.vars)                                      # 3D: corte vertical; 2D y derivadas: perfil a lo largo del corte
+                    svar = ui.select({v: var_name(v, lang) for v in sec_vars}, value=st.var if st.var in sec_vars else sec_vars[0], label=t["variable"]).classes("sl-w-md").mark("sec_var")
+                    scomp = ui.select({"mag": t["comp_mag"], "u": t["comp_u"], "v": t["comp_v"], "normal": t["comp_normal"], "tangential": t["comp_tangential"]},
+                                      value="mag", label=t["component"]).classes("sl-w-md").mark("sec_component")
                     scont = ui.switch(t["contours"], value=True)
+                    slev = ui.switch(t["sec_atlevel"], value=False).mark("sec_atlevel")
                     wf = ui.number(t["wfactor"], value=200, min=1, step=50).classes("sl-w-sm")
                     ui.button(t["hovmoller"], icon="view_timeline", on_click=lambda: show_hov()).props("flat dense")
-                secfig = ui.plotly(go.Figure()).classes("w-full").style("height:430px")
+                with ui.row().classes("row wrap q-col-gutter-sm items-center") as line_box:   # herramientas del perfil 2D
+                    llog = ui.switch(t["sec_log"], value=False).mark("sec_log")
+                    lref = ui.number(t["sec_ref"], value=0.0, format="%g").props("dense").classes("sl-w-sm").mark("sec_ref")
+                    lfit = ui.switch(t["sec_fit"], value=False).mark("sec_fit")
+                    lf1 = ui.number(t["from_km"], value=0.0, format="%g").props("dense").classes("sl-w-sm").mark("sec_fit_from")
+                    lf2 = ui.number(t["to_km"], value=100.0, format="%g").props("dense").classes("sl-w-sm").mark("sec_fit_to")
+                    lint = ui.switch(t["sec_integral"], value=False).mark("sec_integral")
+                    li1 = ui.number(t["from_km"], value=0.0, format="%g").props("dense").classes("sl-w-sm").mark("sec_int_from")
+                    li2 = ui.number(t["to_km"], value=100.0, format="%g").props("dense").classes("sl-w-sm").mark("sec_int_to")
+                line_info = ui.label().classes("text-body2 text-weight-medium").style("white-space:pre-line").mark("sec_readout")
+                secfig = ui.plotly(go.Figure()).classes("w-full").style("height:430px").mark("sec_plot")
                 hovfig = ui.plotly(go.Figure()).classes("w-full").style("height:380px"); hovfig.set_visibility(False)
     with panels, ui.tab_panel(tan):
         with ui.row().classes("row wrap q-col-gutter-sm items-center"):
@@ -527,7 +856,15 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         except Exception:   # noqa: BLE001  (sin navegador o cliente antiguo: ruta de respaldo)
             refresh_map()
     def refresh_time_label():
-        tlabel.set_text(np.datetime_as_string(ds.time.values[st.it], "m").replace("T", " "))
+        tlabel.set_value(np.datetime_as_string(ds.time.values[st.it], "m").replace("T", " "))
+    def goto_time():
+        """Salta a la salida más próxima a la fecha escrita (AAAA-MM-DD HH:MM)."""
+        k = nearest_output(ds.time.values, tlabel.value)
+        if k is None:
+            ui.notify(t["goto_time_bad"], type="warning"); refresh_time_label(); return
+        tsl.set_value(k)
+        if k == st.it:
+            refresh_time_label()
     def refresh_points_list():
         plist.clear()
         with plist:
@@ -535,8 +872,10 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             for i, p in enumerate(st.points):
                 with ui.row().classes("items-center no-wrap q-gutter-xs"):
                     ui.icon("sensors" if p.get("station") else "place").style(f"color:{p['color']}")
-                    ui.input(value=p["name"]).props("dense borderless").style("width:4.5rem").on_value_change(lambda e, p=p: (p.update(name=e.value), refresh_map(), refresh_series()))
-                    ui.label(f"{p['x']:.4f}, {p['y']:.4f}").classes("text-caption text-no-wrap")
+                    ui.input(value=p["name"]).props("dense outlined").classes("text-weight-bold").style("width:7rem").tooltip(t["point_name_tip"]) \
+                        .on_value_change(lambda e, p=p: (p.update(name=e.value), refresh_map(), refresh_series()))
+                    xy = f"{p['x']:.4f}, {p['y']:.4f}" if st.geo else f"{p['x'] / 1e3:.1f}, {p['y'] / 1e3:.1f} km"
+                    ui.label(xy).classes("text-caption text-grey-7 text-no-wrap")
                     ui.button(icon="close", on_click=lambda i=i: remove_point(i)).props("flat dense round size=sm")
             with ui.row().classes("items-center q-gutter-xs"):
                 nx = ui.number("lon" if st.geo else "x", value=round(float(ds.x.mean()), 4)).props("dense").classes("sl-w-sm")
@@ -552,36 +891,71 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         for p in initial_points:
             if (p["name"], p["node"]) not in have:
                 st.add_point(float(p["x"]), float(p["y"]), p["name"], station=bool(p.get("station")))
-        refresh_points_list(); refresh_map(); refresh_series()
+        recolor(); refresh_points_list(); refresh_map(); refresh_series()
+    def recolor():
+        """Un color distinto por punto en el orden de la lista (al quitar puntos no se repiten colores)."""
+        for k, p in enumerate(st.points):
+            p["color"] = COLORS[k % len(COLORS)]
     def remove_point(i):
-        st.points.pop(i); refresh_points_list(); refresh_map(); refresh_series()
+        st.points.pop(i); recolor(); refresh_points_list(); refresh_map(); refresh_series()
     def is_vector(v):
         return (v + "X") in ds
     def refresh_series():
         comp_sel.set_visibility(is_vector(st.var))
         sfig.update_figure(series_figure_multi(st, st.var, lang, wd))
-        refresh_profile()
+        refresh_profile(); refresh_ekman()
     prof_range = {}
     def refresh_profile():
-        """Perfil vertical del último punto en el instante del mapa, con el eje x fijo en toda la simulación."""
-        if not (st.points and st.is3d(st.var)):
+        """Perfil vertical del último punto en el instante del mapa (o medio en la ventana), con el eje x fijo en toda la
+        simulación. Vectores: u, v y |v|; escalares (también la viscosidad): con su unidad en el eje."""
+        if not (st.points and st.is3d(st.var)) or st.iso_ok():
             pfig.set_visibility(False); return
-        p = st.points[-1]; node = p["node"]
-        z = st.vg.zcor(np.array([float(ds.depth.isel(node=node))]), np.array([float(ds.elevation.isel(node=node, time=st.it))]))[0] if "elevation" in ds else st.vg.zcor(np.array([float(ds.depth.isel(node=node))]))[0]
-        if "zCoordinates" in ds:
-            z = ds.zCoordinates.isel(node=node, time=st.it).values
+        p = st.points[-1]; node = p["node"]; its = st.its()
+        z = (st.F.mean_z(its) if len(its) > 1 else st.F.zcor(its[0]))[node]
+        if st.is_vector(st.var):
+            u, v = st.F.columns(st.var, its, "uv"); prof = {"u": u[node], "v": v[node]}
+        else:
+            prof = {"y": st.F.columns(st.var, its)[node]}
         key = (st.var, node)
         if key not in prof_range:
-            arrs = [ds[st.var + "X"].isel(node=node).values, ds[st.var + "Y"].isel(node=node).values] if is_vector(st.var) else [ds[st.var].isel(node=node).values]
-            a = np.concatenate([np.ravel(x) for x in arrs]); a = a[np.isfinite(a)]
+            if st.var + "X" in ds:
+                arrs = [ds[st.var + "X"].isel(node=node).values, ds[st.var + "Y"].isel(node=node).values]
+            elif st.var in ds:
+                arrs = [ds[st.var].isel(node=node).values]
+            else:
+                arrs = list(prof.values())
+            a = np.concatenate([np.ravel(x) for x in arrs]).astype(float); a = a[np.isfinite(a) & (a > -9000)]
             lo, hi = (float(a.min()), float(a.max())) if a.size else (0.0, 1.0)
+            if st.is_vector(st.var):
+                lo = min(lo, -hi * 0.05); hi = max(hi, float(np.hypot(*[np.nanmax(np.abs(x)) for x in arrs[:2]])) if len(arrs) > 1 else hi)
             pad = 0.05 * (hi - lo or 1.0); prof_range[key] = (lo - pad, hi + pad)
-        f = profile_figure(ds, st.var, node, z, st.it, lang)
-        f.update_layout(xaxis_range=list(prof_range[key]),
-                        title=f"{p['name']} · " + np.datetime_as_string(ds.time.values[st.it], "m").replace("T", " "))
-        if is_vector(st.var):
+        when = st.window_text(lang) if st.window is not None else np.datetime_as_string(ds.time.values[st.it], "m").replace("T", " ")
+        f = profile_figure2(z, prof, label(st.var, lang, "u") if st.is_vector(st.var) else label(st.var, lang), lang)
+        f.update_layout(xaxis_range=list(prof_range[key]) if st.window is None else None, title=f"{p['name']} · {when}")
+        if st.is_vector(st.var):
             f.add_vline(x=0, line=dict(color="#999", width=1))
         pfig.update_figure(themed(f, st.dark)); pfig.set_visibility(True)
+    def refresh_ekman():
+        """Perfil (u, v, |v| y viscosidad) y hodógrafa del último punto, con las lecturas de la espiral."""
+        if not (has_3dvel and st.points and ek_exp.value):
+            return
+        try:
+            p = st.points[-1]; node = p["node"]; its = st.its()
+            d = ekman_profile(st, node, its, ek_ref.value, int(ek_k.value or 0), (float(ek_f1.value or -28), float(ek_f2.value or 0)),
+                              None if (ek_i1.value is None or ek_i2.value is None) else (float(ek_i1.value), float(ek_i2.value)), lang=lang)
+            theory = (float(ek_v0.value or 0), float(ek_de.value or 1)) if ek_th.value else None
+            pf, hf = ekman_figures(d, lang, theory)
+            when = st.window_text(lang) if st.window is not None else np.datetime_as_string(ds.time.values[st.it], "m").replace("T", " ")
+            pf.update_layout(title=dict(text=f"{p['name']} · {when}", font=dict(size=12)))
+            if not ek_figs:
+                with ek_figbox:
+                    ek_figs["p"] = ui.plotly(themed(pf, st.dark)).style("flex:1 1 520px;min-width:320px;height:420px").mark("ek_profile")
+                    ek_figs["h"] = ui.plotly(themed(hf, st.dark)).style("flex:1 1 420px;min-width:320px;height:420px").mark("ek_hodograph")
+            else:
+                ek_figs["p"].update_figure(themed(pf, st.dark)); ek_figs["h"].update_figure(themed(hf, st.dark))
+            ek_info.set_text(ekman_text(d, lang))
+        except Exception as ex:   # noqa: BLE001
+            ek_info.set_text(f"{t['ek_title']}: {ex}")
     def refresh_sections_list():
         slist.clear()
         with slist:
@@ -613,13 +987,41 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             secfig.update_figure(go.Figure()); return
         state_sec["active"] = i
         s = st.sections[i]
+        sv = svar.value; comp = scomp.value if st.is_vector(sv) else "mag"; st.sec_comp = comp
+        scomp.set_visibility(st.is_vector(sv))
         try:
-            zr = None
-            if fixed.value:
-                v = s["sec"].scalar(svar.value, st.it); zr = (float(np.nanmin(v)), float(np.nanmax(v))) if np.isfinite(v).any() else None
-                zr = st.zr if svar.value == st.var and st.zr else zr
-            iso = (st.var, st.iso_value) if st.iso_ok() else None
-            secfig.update_figure(section_figure2(s["sec"], svar.value, st.it, arrows=arr.value, contours=scont.value, wfactor=float(wf.value or 200), zrange=zr, lang=lang, dark=st.dark, iso=iso))
+            F, z, vel = section_values(st, s, sv, st.its(), comp)
+            clabel = label(sv, lang, comp)
+            slev.set_visibility(F.ndim == 2)
+            if F.ndim == 2 and slev.value:                         # curva en el nivel del mapa (capa o profundidad fija)
+                if st.depth_mode == "depth":
+                    from ..analysis.sections import interp_at_depth
+                    F = interp_at_depth(F, z, st.depth_m); clabel += f" · {st.depth_m:g} m"
+                else:
+                    F = F[:, st.layer]; clabel += f" · {st.layer_text(st.layer, t)}"
+            when = st.window_text(lang) if st.window is not None else np.datetime_as_string(ds.time.values[st.it], "m").replace("T", " ")
+            title = f"{s['name']} · {clabel} · {when}"
+            line_box.set_visibility(F.ndim == 1)
+            if F.ndim == 1:                                       # variable 2D o derivada: perfil con ajuste e integral
+                units = (VECTOR_UNITS.get(sv) if st.is_vector(sv) else None) or st.F.units(sv)
+                fig, info = section_line_figure(s["sec"], F, clabel, lang, st.dark, log=bool(llog.value), ref=float(lref.value or 0.0),
+                                                fit=(float(lf1.value or 0), float(lf2.value or 0)) if lfit.value else None,
+                                                integ=(float(li1.value or 0), float(li2.value or 0)) if lint.value else None,
+                                                units=units, title=title)
+                line_info.set_text(line_readout(info, units, lang)); secfig.update_figure(fig)
+            else:
+                line_info.set_text("")
+                zr = None
+                if fixed.value:
+                    zr = (float(np.nanmin(F)), float(np.nanmax(F))) if np.isfinite(F).any() else None
+                    if zr and (comp != "mag" or sv in ("verticalVelocity", "vorticity", "vorticity_f")):
+                        m = max(abs(zr[0]), abs(zr[1])); zr = (-m, m)
+                    # la escala del mapa solo vale si es la de la misma variable (en modo isosuperficie st.zr es de profundidad)
+                    zr = st.zr if (sv == st.var and st.zr and st.depth_mode == "layer" and comp == st.mcomp and st.window is None) else zr
+                iso = (st.var, st.iso_value) if st.iso_ok() else None
+                cs = "RdBu_r" if (comp != "mag" or sv in ("vorticity", "vorticity_f")) else None
+                secfig.update_figure(section_figure2(s["sec"], sv, st.it, arrows=arr.value, contours=scont.value, wfactor=float(wf.value or 200), zrange=zr,
+                                                     lang=lang, dark=st.dark, iso=iso, F=F, z=z, vel=vel, clabel=clabel, cs=cs, title=title))
         except Exception as ex:   # noqa: BLE001
             ui.notify(f"{t['sections']}: {ex}", type="warning")
         if switch:
@@ -631,7 +1033,10 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         if st.iso_ok():                                   # h(x, t): profundidad de la isosuperficie a lo largo del corte
             hovfig.update_figure(iso_hovmoller_figure(st.sections[i]["sec"], st.var, st.iso_value, st.iso_label(lang), lang, dark=st.dark))
         else:
-            hovfig.update_figure(hovmoller_figure(st.sections[i]["sec"], svar.value, st.layer, lang, dark=st.dark))
+            sv = svar.value; comp = scomp.value if st.is_vector(sv) else "mag"
+            H = section_hovmoller(st, st.sections[i], sv, comp)
+            hovfig.update_figure(hovmoller_figure(st.sections[i]["sec"], sv, st.layer, lang, dark=st.dark, H=H, clabel=label(sv, lang, comp),
+                                                  signed=comp != "mag" or sv in ("elevation", "vorticity", "vorticity_f", "verticalVelocity", "streamfunction")))
         hovfig.set_visibility(True)
     def move_cursor():
         """Mueve los marcadores y la línea del instante en las series (restyle/relayout, sin redibujar)."""
@@ -639,13 +1044,14 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         if not n:
             return
         xs, ys, tc = series_cursor(st)
+        off = n + int(getattr(st, "_mean_traces", 0))                 # trazas: series, medias de la ventana, marcadores
         try:
             data = sfig.figure["data"]
             for k in range(n):
-                data[n + k]["x"] = [xs[k]]; data[n + k]["y"] = [ys[k]]
+                data[off + k]["x"] = [xs[k]]; data[off + k]["y"] = [ys[k]]
             if sfig.figure["layout"].get("shapes"):
                 sfig.figure["layout"]["shapes"][0].update(x0=tc, x1=tc)
-            sfig.run_plot_method("restyle", {"x": [[x_] for x_ in xs], "y": [[y_] for y_ in ys]}, list(range(n, 2 * n)))
+            sfig.run_plot_method("restyle", {"x": [[x_] for x_ in xs], "y": [[y_] for y_ in ys]}, list(range(off, off + n)))
             sfig.run_plot_method("relayout", {"shapes[0].x0": tc, "shapes[0].x1": tc})
         except Exception:   # noqa: BLE001  (figura cambiada mientras tanto: se redibuja)
             sfig.update_figure(series_figure_multi(st, st.var, lang, wd))
@@ -661,17 +1067,26 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         refresh_time_label(); refresh_map_time(); move_cursor()
         if not in_sections():
             refresh_profile()                                      # el perfil vertical sigue al tiempo
+            if st.window is None:
+                refresh_ekman()
         if state_sec["active"] is not None and in_sections():     # la sección sigue al tiempo solo si se está viendo
             show_section(state_sec["active"], switch=False)
     def refresh_range():
-        st.zr = dataset_range(ds, st.var, st.layer) if st.depth_mode == "layer" else (st.iso_range() if st.iso_ok() else None)
+        try:
+            st.zr = st.value_range(st.var)
+        except Exception:   # noqa: BLE001  (campo vacío en esa capa o ventana)
+            st.zr = None
     def on_var(e):
-        st.var = e.value; refresh_range()
+        st.var = e.value
+        if not st.is_vector(st.var):
+            st.mcomp = "mag"
+        mcomp.set_visibility(st.is_vector(st.var))
+        refresh_range()
         refresh_map(); refresh_series()
         if state_sec["active"] is not None and st.depth_mode == "iso":
             show_section(state_sec["active"], switch=False)
     def on_layer(e):
-        st.layer = int(e.value); st.zr = dataset_range(ds, st.var, st.layer)
+        st.layer = int(e.value); refresh_range()
         lsl.props(f'label-value="{layer_text(st.layer)}"'); refresh_map(); refresh_series()
     def on_dmode(e):
         st.depth_mode = e.value; lsl_box.set_visibility(e.value == "layer"); ldep.set_visibility(e.value == "depth"); ival.set_visibility(e.value == "iso")
@@ -731,8 +1146,9 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             from ..analysis.isosurface import isosurface_series
             cols = {p["name"]: isosurface_series(ds, st.var, st.iso_value, p["node"], st.vg) for p in st.points}
             df = pd.DataFrame(cols, index=pd.DatetimeIndex(ds.time.values)); f = wd / f"iso_{st.var}_{st.iso_value:g}.csv"; df.to_csv(f); ui.download(f); return
+        depth = st.depth_m if (st.is3d(st.var) and st.depth_mode == "depth") else None
         for p in st.points:
-            s = point_series(ds, st.var, p["node"], st.layer)
+            s = st.F.series(st.var, p["node"], layer=st.layer if st.is3d(st.var) else None, depth=depth)   # también derivadas
             if "u" in s:
                 cols[p["name"] + "_u"] = s["u"]; cols[p["name"] + "_v"] = s["v"]
             else:
@@ -796,15 +1212,49 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         st.zmanual = (float(lo), float(hi)) if (lo is not None and hi is not None and float(hi) > float(lo)) else None
         refresh_map()
     zlo.on_value_change(lambda e: set_manual()); zhi.on_value_change(lambda e: set_manual())
+    def on_mcomp(e):
+        st.mcomp = e.value or "mag"; refresh_range(); refresh_map()
+    def set_window():
+        """Activa o actualiza el promedio entre las dos fechas (índices de las salidas incluidas)."""
+        from ..analysis.derived import time_window
+        if not avg_sw.value:
+            st.window = None; avg_n.set_text("")
+        else:
+            try:
+                w = time_window(ds.time.values, avg_a.value, avg_b.value)
+            except (ValueError, TypeError):
+                ui.notify(t["goto_time_bad"], type="warning"); return
+            if w.size == 0:
+                ui.notify(t["avg_empty"], type="warning"); st.window = None; avg_n.set_text(t["avg_empty"])
+            else:
+                st.window = w; avg_n.set_text(st.window_text(lang))
+        avg_box.set_visibility(bool(avg_sw.value))
+        refresh_range(); refresh_map(); refresh_series()
+        if state_sec["active"] is not None:
+            show_section(state_sec["active"], switch=False)
+        if callable(st.on_window):
+            st.on_window()
     def in_sections() -> bool:
         return str(panels.value) in ("tab_sections", str(tsec))
     def on_subtab(e):
         st.click_mode = "section" if in_sections() else "point"; st.pending = None; armed["mode"] = None; refresh_map()
     panels.on_value_change(on_subtab)
+    mcomp.on_value_change(on_mcomp); mcomp.set_visibility(st.is_vector(st.var))
+    for w_ in (ek_ref, ek_k, ek_f1, ek_f2, ek_i1, ek_i2, ek_th, ek_v0, ek_de):
+        w_.on_value_change(lambda e: refresh_ekman())
+    ek_exp.on_value_change(lambda e: refresh_ekman())
+    ek_k.bind_visibility_from(ek_ref, "value", backward=lambda v: v == "level")
+    avg_sw.on_value_change(lambda e: set_window())
+    for w_ in (avg_a, avg_b):
+        w_.on("keydown.enter", lambda e: set_window()); w_.on("blur", lambda e: set_window())
     tsl.on_value_change(on_time)
+    tlabel.on("keydown.enter", lambda e: goto_time()); tlabel.on("blur", lambda e: goto_time())
     ui.timer(0.08, render_time)
     comp_sel.on_value_change(lambda e: (setattr(st, "component", e.value), sfig.update_figure(series_figure_multi(st, st.var, lang, wd))))
     svar.on_value_change(lambda e: show_section(state_sec["active"])); scont.on_value_change(lambda e: show_section(state_sec["active"])); wf.on_value_change(lambda e: show_section(state_sec["active"]))
+    for w_ in (scomp, slev, llog, lref, lfit, lf1, lf2, lint, li1, li2):
+        w_.on_value_change(lambda e: show_section(state_sec["active"], switch=False) if state_sec["active"] is not None else None)
+    scomp.set_visibility(st.is_vector(svar.value)); line_box.set_visibility(False)
     plot.on("plotly_click", on_click, js_handler=CLICK_JS); plot.on("plotly_relayout", on_relayout)
     lsl_box.set_visibility(st.nvrt > 1); ldep.set_visibility(False); ival.set_visibility(False); dmode.set_visibility(st.nvrt > 1)
     refresh_time_label(); refresh_points_list(); refresh_sections_list(); refresh_series()
@@ -857,7 +1307,7 @@ def spectrum_tab(ds, c: dict, wd: Path, t: dict, lang: str, st: ExplorerState):
         with ui.column().classes("col-12 col-md-6"):
             pfig = ui.plotly(go.Figure()).classes("w-full").style("height:320px")
     rfig = ui.plotly(go.Figure()).classes("w-full").style("height:300px"); rfig.set_visibility(False)
-    wfig = ui.plotly(go.Figure()).classes("w-full").style("height:420px")
+    wcol = ui.column().classes("w-full")                         # una wavelet por punto o estación seleccionada
     ui.button(t["download_psd"], icon="download", on_click=lambda: export_psd()).props("flat dense")
     cache = {}
 
@@ -879,16 +1329,12 @@ def spectrum_tab(ds, c: dict, wd: Path, t: dict, lang: str, st: ExplorerState):
         p = next((p for p in st.points if p["name"] == name), None)
         if p is None:
             return None
-        return point_series(ds, pvar.value, p["node"], st.layer)
+        return st.F.series(pvar.value, p["node"], layer=st.layer if st.is3d(pvar.value) else None)   # también derivadas
     def _cart_lat(y_m):
-        """Dominio cartesiano: latitud equivalente para el periodo inercial (plano f: lat0; plano β: lat0 + y/R)."""
-        cor = (c.get("physics") or {}).get("coriolis", "f-plane")
-        if cor in ("none", False, 0, None):
-            return None
-        lat0 = float((c.get("reference") or {}).get("lat0", 45.0))
-        if cor == "beta" and y_m is not None:
-            return lat0 + float(np.rad2deg(float(y_m) / 6371e3))
-        return lat0
+        """Dominio cartesiano: latitud con el periodo inercial del f del modelo (plano f: lat0; plano β: f0 + β y)."""
+        from ..analysis.dynamics import case_coriolis, inertial_lat
+        f = case_coriolis(c, 0.0, 0.0 if y_m is None else float(y_m), geographic=False)
+        return None if f is None else inertial_lat(float(np.ravel(f)[0]))
     def lat_of(name):
         if src.value == "stations":
             for s_ in (c.get("stations") or []):
@@ -904,7 +1350,7 @@ def spectrum_tab(ds, c: dict, wd: Path, t: dict, lang: str, st: ExplorerState):
         return p["y"] if st.geo else _cart_lat(p["y"])
     def refresh():
         names = list(psel.value or [])
-        sf, pf, rf = go.Figure(), None, None; wf_ = None; msg = []
+        sf, pf, rf = go.Figure(), None, None; wfs = []; msg = []
         cache.clear()
         for k, name in enumerate(names):
             s = get_series(name)
@@ -933,12 +1379,16 @@ def spectrum_tab(ds, c: dict, wd: Path, t: dict, lang: str, st: ExplorerState):
             if uu is not None:
                 rr = rotary_spectrum(uu, vv, dt, nperseg=max(16, int(float(nper.value or 0.5) * n)))
                 rf = rf or rotary_figure(rr, refs, lang, dark=st.dark)
-            if k == 0:
-                w = wavelet_morlet(y, dt, omega0=float(w0.value or 6))
-                wf_ = wavelet_figure(w, t0 if np.issubdtype(np.asarray(s["t"]).dtype, np.datetime64) else None, refs, lang, dark=st.dark, global_name=t["global_spectrum"])
-                wf_.update_layout(title=f"wavelet · {name}")
+            w = wavelet_morlet(y, dt, omega0=float(w0.value or 6))
+            wf_ = wavelet_figure(w, t0 if np.issubdtype(np.asarray(s["t"]).dtype, np.datetime64) else None, refs, lang, dark=st.dark, global_name=t["global_spectrum"])
+            wf_.update_layout(title=dict(text=f"wavelet · {name}", font=dict(color=color)))
+            wfs.append(wf_)
         sf.update_layout(hovermode="x unified", **layout(st.dark))
-        sfig.update_figure(sf); pfig.update_figure(pf or go.Figure()); wfig.update_figure(wf_ or go.Figure())
+        sfig.update_figure(sf); pfig.update_figure(pf or go.Figure())
+        wcol.clear()
+        with wcol:
+            for wf_ in wfs:
+                ui.plotly(wf_).classes("w-full").style("height:420px")
         rfig.set_visibility(rf is not None)
         if rf is not None:
             rfig.update_figure(rf)

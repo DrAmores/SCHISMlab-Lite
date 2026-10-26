@@ -62,6 +62,7 @@ physics:
   turbulence: 3          # itur: 0 ninguno | 3 k-kl (GLS) | 5 k-ε (GLS); en 2D se ignora
   coriolis: f-plane      # f-plane | beta | none
   shapiro: 1             # filtro de Shapiro (ishapiro)
+  shapiro0: 0.1          # fuerza del filtro (0–0.5): 0.1 por defecto en dominios idealizados, 0.5 en mallas reales
   indvel: 0              # método de velocidad (0 = recomendado)
   ihorcon: 0             # viscosidad horizontal (0 | 1 | 2)
   hvis_coef0: 0.025      # coeficiente de viscosidad horizontal (con ihorcon)

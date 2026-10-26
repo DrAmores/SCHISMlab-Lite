@@ -34,9 +34,11 @@ def principal_axis(ds: xr.Dataset) -> float:
     return float(np.arctan2(ax[1], ax[0]))
 
 
-def preset_section(ds: xr.Dataset, point, kind: str = "transversal", pad: float = 0.02):
+def preset_section(ds: xr.Dataset, point, kind: str = "transversal", pad: float = 0.0):
     """Recta por `point` (lon/lat o x/y) a lo largo del eje principal (longitudinal) o perpendicular (transversal),
-    recortada al rectángulo del dominio. Devuelve (p0, p1) en las coordenadas de la malla."""
+    recortada al rectángulo del dominio (de borde a borde: llega a la costa o a la pared). Devuelve (p0, p1) en las
+    coordenadas de la malla, orientada de oeste a este si es más zonal que meridiana y de sur a norte si no (así la
+    distancia 0 es siempre el extremo oeste o sur)."""
     th = principal_axis(ds)
     if kind == "transversal":
         th += np.pi / 2
@@ -56,9 +58,21 @@ def preset_section(ds: xr.Dataset, point, kind: str = "transversal", pad: float 
     tneg = max(t for t in ts if t <= 0) if any(t <= 0 for t in ts) else 0.0
     tpos = min(t for t in ts if t >= 0) if any(t >= 0 for t in ts) else 0.0
     L = tpos - tneg
+    pad = max(float(pad), 1e-6)                      # un pelo hacia dentro: el extremo cae en un triángulo de la malla
     p0 = (x0 + ex * (tneg + pad * L), y0 + ey * (tneg + pad * L))
     p1 = (x0 + ex * (tpos - pad * L), y0 + ey * (tpos - pad * L))
+    xm, ym = metric_xy(ds, [p0[0], p1[0]], [p0[1], p1[1]])
+    dx, dy = xm[1] - xm[0], ym[1] - ym[0]
+    if (abs(dx) >= abs(dy) and dx < 0) or (abs(dy) > abs(dx) and dy < 0):
+        p0, p1 = p1, p0
     return p0, p1
+
+
+def compass(dx: float, dy: float, lang: str = "es") -> str:
+    """Rumbo de 8 puntos (N, NE, E, SE, S, SO/SW, O/W, NO/NW) de un vector (este, norte)."""
+    names = ["E", "NE", "N", "NO", "O", "SO", "S", "SE"] if lang == "es" else ["E", "NE", "N", "NW", "W", "SW", "S", "SE"]
+    k = int(np.round(np.arctan2(dy, dx) / (np.pi / 4))) % 8
+    return names[k]
 
 
 class Section:

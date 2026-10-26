@@ -9,7 +9,7 @@ from nicegui import ui
 from ..initial import (VARIABLES, recipe_expression, recipe_matches, recipe_from_value, recipe_uses_z, density,
                        domain_frame, domain_extent, evaluate_field)
 from ..expressions import is_expression
-from .figures import LAYOUT, layout as _layout, NodeSampler as _Sampler
+from .figures import LAYOUT, layout as _layout, NodeSampler as _Sampler, color_range
 
 
 _MODE_FIELDS = {
@@ -126,7 +126,8 @@ def section_figure(frame: dict, depth: np.ndarray, vg, fields: dict, axis: str, 
     Z = np.full((zi.size, s.size), np.nan)
     for i in range(s.size):
         Z[:, i] = np.interp(zi, z[i], f[i], left=np.nan, right=np.nan)
-    fig = go.Figure(go.Heatmap(x=s / 1e3, y=zi, z=Z, colorscale="Viridis", colorbar=dict(title=label, thickness=14, tickformat=".3g"),
+    lo, hi, fmt = color_range(Z)
+    fig = go.Figure(go.Heatmap(x=s / 1e3, y=zi, z=Z, colorscale="Viridis", zmin=lo, zmax=hi, colorbar=dict(title=label, thickness=14, tickformat=fmt),
                                hovertemplate="%{x:.1f} km<br>z %{y:.1f} m<br>%{z:.3f}<extra></extra>"))
     fig.add_trace(go.Scatter(x=s / 1e3, y=-h, mode="lines", line=dict(color="#5d4037", width=2), hoverinfo="skip", showlegend=False))
     dirn = ("O→E" if axis == "x" else "S→N") if lang == "es" else ("W→E" if axis == "x" else "S→N")
@@ -206,7 +207,9 @@ def ic_builder(c: dict, wd: Path, t: dict, lang: str, get_vgrid, is_baroclinic, 
             else:
                 f = surf[sel]; label = t["icv_" + sel]                       # la etiqueta ya lleva la unidad
             Z = sampler.grid(f)
-            fig = go.Figure(go.Heatmap(x=sampler.xi, y=sampler.yi, z=Z, colorscale="Viridis", zsmooth="best", colorbar=dict(title=label, thickness=14, tickformat=".3g"),
+            lo, hi, fmt = color_range(f)                                    # rango mínimo con campos constantes; decimales legibles
+            fig = go.Figure(go.Heatmap(x=sampler.xi, y=sampler.yi, z=Z, colorscale="Viridis", zsmooth="best", zmin=lo, zmax=hi,
+                                       colorbar=dict(title=label, thickness=14, tickformat=fmt),
                                        hovertemplate="%{x:.3f}, %{y:.3f}<br>%{z:.3f}<extra></extra>"))
             fig.update_layout(title=t["ic_surface"], xaxis=dict(title="lon" if geo else "x (m)"), yaxis=dict(title="lat" if geo else "y (m)"), **_layout(dark))
             plan.update_figure(fig)

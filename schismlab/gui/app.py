@@ -1494,6 +1494,7 @@ def page_mesh():
                 cards = [(t["nodes"], _n(nn)), (t["elements"], _n(len(d['tri']))),
                          (t["res_stats"], f"{_n(vs['size_p5'])} / {_n(vs['size_p50'])} / {_n(vs['size_p95'])} m"),
                          (t["res_range"], f"{_n(vs['size_min'])} – {_n(vs['size_max'])} m"),
+                         *([(t["res_short"], f"{_n(vs['short_p50'])} m")] if vs.get("short_p50") else []),
                          (t["angle_stats"], f"{fmt_num(vs['angle_min'], lang, 1)}° · {vs['angle_lt20']} < 20°"),
                          (t["depth_range"], f"{_n(float(d['depth'].min()))} – {_n(float(d['depth'].max()))} m")]
                 for lab, val in cards:
@@ -1886,6 +1887,23 @@ def page_model():
                 cor = ui.select(["f-plane", "beta", "none"], value=safe_select(["f-plane", "beta", "none"], _cor0, "f-plane", label=t["coriolis"]), label=t["coriolis"]).classes("sl-w-sm")
                 ref = c.get("reference", {})
                 lon0 = ui.number("lon0", value=float(ref.get("lon0", 0))).classes("sl-w-sm"); lat0 = ui.number("lat0", value=float(ref.get("lat0", 45))).classes("sl-w-sm")
+            # filtro de Shapiro: 0.1 por defecto en dominios idealizados, 0.5 en mallas reales (lo mismo que setup.py)
+            _shap_def = 0.1 if (c.get("mesh", {}) or {}).get("generator", default_generator()) == "idealized" else 0.5
+            _shap0 = ph.get("shapiro0", (c.get("param") or {}).get("shapiro0", _shap_def))
+            with ui.row().classes("row wrap q-col-gutter-sm items-center w-full"):
+                shap = ui.number(t["shapiro0"], value=float(_shap0), min=0, max=0.5, step=0.05, format="%g").classes("sl-w-md").mark("shapiro0")
+                ui.label(t["shapiro0_hint"]).classes("text-caption text-grey-7 col")
+            # viscosidad y difusividad verticales constantes (itur = 0): las de param.nml (sobreescrituras > plantilla)
+            from ..io.namelist_catalog import defaults as _nml_def
+            _pov = {**(c.get("param") or {}), **((c.get("namelists") or {}).get("param.nml") or {})}
+            _numf = lambda v, d: float(str(v).lower().replace("d", "e")) if v is not None else d
+            _dfv0 = _numf(_pov.get("dfv0", _nml_def("param.nml").get("dfv0")), 1e-2)
+            _dfh0 = _numf(_pov.get("dfh0", _nml_def("param.nml").get("dfh0")), 1e-4)
+            with ui.row().classes("row wrap q-col-gutter-sm items-center w-full") as dfrow:
+                dfv = ui.number(t["dfv0"], value=_dfv0, min=0, format="%g").classes("sl-w-md").mark("dfv0")
+                dfh = ui.number(t["dfh0"], value=_dfh0, min=0, format="%g").classes("sl-w-md").mark("dfh0")
+                ui.label(t["dfv0_hint"]).classes("text-caption text-grey-7 col")
+            turb.on_value_change(lambda e: dfrow.set_visibility(e.value == 0)); dfrow.set_visibility(turb.value == 0)
             # Igual que Setup.geographic: dominio real o idealizado en lon/lat -> ics=2, ncor=1 (Coriolis completo)
             mc_ = c.get("mesh", {}) or {}
             geo_dom = mc_.get("generator", default_generator()) != "idealized" or ("lon" in mc_ and "lat" in mc_)
@@ -1953,6 +1971,20 @@ def page_model():
                 vv.update(nsigma=int(nvrt.value), zlevels=[float(z) for z in zl.value.split(",")], h_c=float(hc.value), theta_b=float(tb.value or 0), theta_f=float(tf.value))
             c2["vertical"] = vv
             c2["physics"] = {**c2.get("physics", {}), "baroclinic": bool(baro.value), "turbulence": int(turb.value), "coriolis": cor.value}
+            # shapiro0 solo se escribe si el caso ya lo tenía o se ha cambiado (los casos guardados siguen el valor por defecto)
+            _sv = float(shap.value) if shap.value is not None else float(_shap0)
+            if "shapiro0" in ph or abs(_sv - float(_shap0)) > 1e-12:
+                c2["physics"]["shapiro0"] = min(max(_sv, 0.0), 0.5)
+                if "shapiro0" in (c2.get("param") or {}):            # una sobreescritura directa ganaría: se actualiza
+                    c2["param"]["shapiro0"] = c2["physics"]["shapiro0"]
+            # dfv0 y dfh0 solo se escriben si se han cambiado o el caso ya los fijaba (donde estuvieran)
+            for _k, _w, _v0 in (("dfv0", dfv, _dfv0), ("dfh0", dfh, _dfh0)):
+                _v = max(float(_w.value), 0.0) if _w.value is not None else _v0
+                _nl = (c2.get("namelists") or {}).get("param.nml") or {}
+                if _k in _nl:
+                    _nl[_k] = _v
+                elif _k in (c2.get("param") or {}) or abs(_v - _v0) > 1e-15:
+                    c2.setdefault("param", {})[_k] = _v
             c2["reference"] = {"lon0": float(lon0.value), "lat0": float(lat0.value)}
             c2["initial"] = ic_collect()
             if ic_src.value != "analytic":                       # Copernicus: T, S y eta vienen del reanalisis

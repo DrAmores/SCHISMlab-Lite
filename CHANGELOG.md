@@ -3,6 +3,58 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.7.3 (2026-10-26) — Viscosidad constante en Física
+
+- Física → Modelo: con el cierre turbulento «ninguno» aparecen la viscosidad vertical A_z (`dfv0`) y la difusividad
+  vertical K_z (`dfh0`), sin tener que ir a Parámetros avanzados. Junto con el filtro de Shapiro (`shapiro0`) y el
+  cierre turbulento (ninguno, k-kl o k-ε) permiten elegir desde la interfaz el caso base de cada práctica (por ejemplo,
+  P6 con A_z constante o con k-kl y `shapiro0` = 0.5).
+
+## 0.7.2 (2026-10-26)
+
+- La función de corriente indica en el selector que solo vale en cuencas cerradas (sin islas ni contornos abiertos).
+
+## 0.7.1 (2026-10-26) — Secciones en el nivel del mapa
+
+- Secciones: **Solo en el nivel del mapa** dibuja una variable 3D en la capa (o la profundidad fija) del mapa como una
+  curva a lo largo del corte, con el ajuste y la integral: por ejemplo, v en superficie a lo largo de la sección.
+- La función de corriente se calcula mucho más deprisa en simulaciones largas; la exportación a CSV y el espectro
+  admiten las variables derivadas.
+
+## 0.7.0 (2026-10-26) — Prácticas sin cuaderno: derivadas, promedios, espiral de Ekman y secciones con ajuste
+
+Todo lo que las prácticas P1–P7 pedían hacer con el cuaderno se hace ahora en **Mapas y series**:
+
+- **Variables derivadas** en el selector: vorticidad ζ, ζ/f (con el f del modelo, también en plano β), transporte
+  integrado en la vertical (Tx, Ty, m²/s) y función de corriente ψ (Sv).
+- **Componentes con signo**: módulo, u (este) o v (norte) en el mapa; u, v, normal y tangencial a la sección en
+  Secciones y Hovmöller.
+- **Promediar entre t1 y t2**: la media de las salidas entre dos fechas en el mapa, las secciones, el perfil vertical
+  y las lecturas; en las series se marca la ventana y se da la media de cada una. El título dice cuántas salidas son.
+- **Perfil y hodógrafa** en Puntos: u, v, |v| y viscosidad frente a z; v_E frente a u_E con los ejes a la misma
+  escala, restando la velocidad de un nivel o la geostrófica de η, con la espiral teórica opcional. Lecturas
+  automáticas: corriente de superficie y su ángulo con el viento, profundidad de inversión, ajuste de ln|v_E| (De y
+  Az) y transporte con su ángulo.
+- **Secciones de variables 2D** (elevation, depthAverageVel, transport...) como curva, con eje logarítmico, valor de
+  referencia, ajuste lineal (α y 1/α) e integral entre dos distancias (en Sv con el transporte).
+- Las **series de las estaciones** de variables 3D salen del netCDF en la capa elegida (staout solo en superficie).
+- Presentación: las secciones predefinidas van de borde a borde y siempre de oeste a este o de sur a norte, con los
+  extremos rotulados; las flechas del mapa son las de la propia variable vectorial (y se dice de qué son); barras de
+  color legibles (densidad con decimales, campos constantes sin ruido); el nivel 0 se llama «fondo (velocidad nula)»
+  en Mapas y Partículas; una wavelet por punto; estaciones con su nombre y un color por serie; campo de fecha y hora
+  para ir a una salida; ejes en metros al comparar casos cartesianos; Hovmöller de isosuperficie en gris donde la
+  isoterma no corta la columna; la sección en modo isosuperficie usa la escala de la variable; la Malla actual dice
+  que mide la arista media y da la arista más corta (= dx); el espectro rotatorio ya no tiene un punto de más.
+
+## 0.6.3 (2026-10-26) — Prácticas: viscosidad con estado inicial y filtro de Shapiro
+
+- **La viscosidad vertical `dfv0` no actuaba** cuando el caso arranca de un estado inicial completo (`hotstart.nc`, que
+  se escribe si T, S o la velocidad dependen de la posición) y no hay cierre turbulento. Ahora sí. Cambian los
+  resultados de P1, P4 y P6: en P6 la corriente de superficie ya no se satura a 5 m/s y el transporte de Ekman queda a
+  un 4 % del teórico.
+- **Filtro de Shapiro más suave por defecto** (`shapiro0` = 0.1 en vez de 0.5): el valor máximo frenaba las corrientes
+  junto a las paredes. Los casos guardados sin ese valor también usan 0.1. Se puede cambiar en **Física → Modelo**.
+
 ## 0.6.2 (2026-10-24) — Página Parámetros
 
 - Pasar a **Parámetros** daba un error 500 («No such file or directory: …/schismlab/forcing/waves.py»): la página buscaba en un sitio antiguo el código que dice qué parámetros fija

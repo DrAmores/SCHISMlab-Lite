@@ -23,7 +23,8 @@ def load(wd: Path) -> dict:
     wd = Path(wd); hg = wd / "hgrid.gr3"; cache = wd / "mesh_view.npz"
     if cache.exists() and cache.stat().st_mtime >= hg.stat().st_mtime:
         z = np.load(cache)
-        return {k: z[k] for k in z.files}
+        if "short" in z.files:                            # cachés anteriores a la arista más corta: se recalculan
+            return {k: z[k] for k in z.files}
     from ..io.gr3 import read_gr3
     from .quality import edge_lengths_m
     m = read_gr3(hg)
@@ -33,7 +34,7 @@ def load(wd: Path) -> dict:
     cosang = np.stack([(b**2 + c**2 - a**2) / (2*b*c), (a**2 + c**2 - b**2) / (2*a*c), (a**2 + b**2 - c**2) / (2*a*b)], 1)
     ang = np.degrees(np.arccos(np.clip(cosang, -1, 1))).min(1)
     d = dict(x=np.asarray(m.x, float), y=np.asarray(m.y, float), depth=np.asarray(m.depth, float), tri=tri,
-             size=L.mean(1).astype("float32"), minang=ang.astype("float32"))
+             size=L.mean(1).astype("float32"), short=L.min(1).astype("float32"), minang=ang.astype("float32"))
     np.savez(cache, **d)
     return d
 
@@ -46,7 +47,8 @@ def stats(d: dict) -> dict:
     h, _ = np.histogram(s, bins=edges)
     return dict(size_p5=float(np.percentile(s, 5)), size_p50=float(np.median(s)), size_p95=float(np.percentile(s, 95)),
                 size_min=float(s.min()), size_max=float(s.max()), hist_edges=edges.tolist(), hist_counts=h.tolist(),
-                angle_lt20=int((d["minang"] < 20).sum()), angle_min=float(d["minang"].min()))
+                angle_lt20=int((d["minang"] < 20).sum()), angle_min=float(d["minang"].min()),
+                short_p50=float(np.median(d["short"])) if "short" in d else None)   # arista más corta: dx en una rejilla regular
 
 
 CFL_MIN = 0.4                               # documentación de SCHISM (grid-generation): CFL inverso > 0.4 (0.2 en tsunamis)

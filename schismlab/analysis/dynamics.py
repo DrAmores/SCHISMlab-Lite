@@ -133,6 +133,34 @@ def coriolis(ds: xr.Dataset) -> xr.DataArray:
     raise ValueError("dominio cartesiano: indica f en ds.attrs['coriolis'] (1/s)")
 
 
+OMEGA = 7.292115e-5
+
+
+def case_coriolis(cfg: dict | None, x, y, geographic: bool) -> np.ndarray | None:
+    """f (1/s) en los puntos (x, y) con la misma regla que SCHISM según el caso (None si no hay rotación):
+    lon/lat: 2Ω sin(lat); cartesiano plano f: 2Ω sin(lat0); plano β (ncor = 1): f0 + β (φ − φ0), con
+    φ = lat0 + y/R (lat0 es la latitud de y = 0, el borde sur de los dominios idealizados)."""
+    x = np.asarray(x, float); y = np.asarray(y, float)
+    if geographic:
+        return 2 * OMEGA * np.sin(np.deg2rad(y))
+    cfg = cfg or {}
+    cor = (cfg.get("physics") or {}).get("coriolis", "f-plane")
+    if cor in ("none", False, 0, None, "0", "false"):
+        return None
+    lat0 = np.deg2rad(float((cfg.get("reference") or {}).get("lat0", 45.0)))
+    f0 = 2 * OMEGA * np.sin(lat0)
+    if cor == "beta":
+        return f0 + 2 * OMEGA * np.cos(lat0) * (y / 6371e3)
+    return np.full(y.shape, f0)
+
+
+def inertial_lat(f) -> float | None:
+    """Latitud (grados) cuyo periodo inercial es el de f (para las líneas de referencia de los espectros)."""
+    if f is None or not np.isfinite(f) or abs(f) < 1e-12:
+        return None
+    return float(np.degrees(np.arcsin(np.clip(f / (2 * OMEGA), -1.0, 1.0))))
+
+
 def transport(ds: xr.Dataset, time=None, vg=None) -> tuple[xr.DataArray, xr.DataArray]:
     """Transporte integrado en la vertical (U, V) en m²/s: integral de horizontalVel en z (zCoordinates o malla vertical
     vg; sin ellas, la de la simulación) o, si solo hay depthAverageVel, velocidad media por (h + eta)."""
