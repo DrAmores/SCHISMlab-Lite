@@ -119,7 +119,11 @@ condiciones iniciales.
 **Filtro de Shapiro (`shapiro0`).** Es un filtro numérico que suaviza la velocidad para quitar el ruido de malla. Con
 valores altos (0.5, el máximo) actúa como una fricción lateral: frena las corrientes junto a las paredes, ensancha las
 corrientes de frontera y amortigua las oscilaciones inerciales. En los dominios idealizados vale 0.1 por defecto; los
-casos guardados sin ese campo también usan 0.1.
+casos guardados sin ese campo también usan 0.1. Los frentes
+estrechos, de una o dos celdas (P6), necesitan 0.5.
+
+**Cierre turbulento en 2D.** Con la malla vertical 2D no hay mezcla vertical que calcular y SCHISMlab escribe itur = 0;
+la página no muestra el selector del cierre.
 **Viscosidad vertical sin cierre turbulento.** Con «ninguno» la viscosidad y la difusividad verticales son constantes:
 `dfv0` (A_z) y `dfh0` (K_z), que aparecen en Modelo, debajo del cierre turbulento, al elegir «ninguno». Se respetan también cuando el caso arranca de un estado inicial completo
 (`hotstart.nc`, que se escribe si T, S o la velocidad dependen de la posición).
@@ -228,7 +232,10 @@ próxima. Lo que hace un clic en el mapa lo decide la subpestaña abierta debajo
   Los extremos de las secciones se pueden **arrastrar** y el corte se actualiza. Los botones **Transversal** y
   **Longitudinal** esperan un clic en el mapa y trazan la sección perpendicular o paralela al eje principal del
   dominio por ese punto, de borde a borde (llega a la costa o a la pared) y orientada siempre de oeste a este o de
-  sur a norte: la distancia 0 es el extremo oeste o sur. Los extremos se rotulan con su rumbo (O, E, S, N...).
+  sur a norte: la distancia 0 es el extremo oeste o sur. Los extremos se rotulan con su rumbo (O, E, S, N...) y el eje
+  dice desde cuál se mide («distancia desde el extremo oeste (O)»). El número de puntos del corte depende de su longitud
+  y de la malla (dos por elemento en el tramo más fino, de 120 a 2000), así que un pulso estrecho no se recorta. La
+  variable de la sección sigue a la del mapa hasta que se elige otra a mano.
 - El corte vertical muestra la variable con isolíneas y flechas (componente de la velocidad a lo largo del
   corte y velocidad vertical w multiplicada por el «factor w»); el botón Hovmöller dibuja distancia–tiempo.
 - **Animación**: mapa o sección animados en el navegador (cada N instantes) y **Exportar MP4** de la vista
@@ -241,12 +248,13 @@ próxima. Lo que hace un clic en el mapa lo decide la subpestaña abierta debajo
   del modelo: lon/lat, plano f con lat0 o plano β), `transport` (transporte por unidad de anchura Tx, Ty = ∫ (u, v) dz,
   m²/s) y `streamfunction` (función de corriente ψ del transporte, en Sv, con ψ = 0 en el contorno: solo vale en
   cuencas cerradas sin islas).
-- **Componentes con signo.** En las variables vectoriales el selector *Componente* del mapa elige módulo, u (este) o v
-  (norte); en Puntos, u y v, una de ellas o el módulo; en Secciones y Hovmöller también la componente **normal** a la
+- **Componentes con signo.** En las variables vectoriales el selector *Componente del mapa* elige módulo, u (este) o v
+  (norte); en Puntos, *Componente en las series*: u y v, una de ellas o el módulo; en Secciones, *Componente en la sección*; en Secciones y Hovmöller también la componente **normal** a la
   sección (positiva a la izquierda del avance: hacia el norte en una sección de oeste a este) y la **tangencial**.
 - **Promediar entre t1 y t2.** El interruptor bajo el nivel activa la media de las salidas incluidas entre las dos
   fechas (AAAA-MM-DD HH:MM; ambas incluidas). Se aplica al mapa, a las secciones, al perfil vertical y a las lecturas de
-  la espiral; en las series se marca la ventana y se da la media de cada serie. El título dice cuántas salidas entran.
+  la espiral; en las series se marca la ventana y la media de cada serie aparece en una tabla bajo la figura, con su
+  color. El título dice qué ventana es.
   Con vectores, el módulo es el de la velocidad media; ψ se calcula del transporte medio.
 - **Estaciones en una capa.** Para una variable 3D, la serie de una estación usa el fichero fino `staout` solo en la
   capa de superficie; en otra capa o a profundidad fija usa las salidas netCDF en ese nivel.
@@ -256,13 +264,19 @@ próxima. Lo que hace un clic en el mapa lo decide la subpestaña abierta debajo
   profundo no está fuera de la capa de Ekman); espiral teórica opcional con el V0 y el De que escribas. Lecturas: módulo
   y ángulo de la corriente de superficie respecto al viento (positivo a la derecha), primera profundidad a la que va en
   sentido contrario, ajuste de ln|v_E| frente a z en el rango elegido (De y Az = |f| De²/2) y transporte (∫ u_E dz,
-  ∫ v_E dz) en el rango de z elegido (vacío = toda la columna) con su ángulo respecto al viento.
+  ∫ v_E dz) en el rango de z elegido (vacío = toda la columna; «desde» vacío es el fondo y «hasta» 0 es la superficie
+  libre, aunque η > 0) con su ángulo respecto al viento. La hodógrafa no dibuja el nivel del fondo (velocidad nula). Si
+  la viscosidad guardada cambia en el tramo del ajuste (k-kl), las lecturas avisan de que De y Az suponen A_z constante.
 - **Secciones de variables 2D** (`elevation`, `depthAverageVel`, `transport`, `vorticity`...): se dibujan como una
   curva a lo largo del corte, con eje Y logarítmico opcional (de |y − referencia|), **ajuste lineal** en un tramo
   (pendiente α y escala 1/α en km) e **integral** entre dos distancias (con `transport` da m³/s y Sv: el transporte de
-  una corriente). Se indican también los cambios de signo. En una variable 3D, el interruptor **Solo en el nivel del
-  mapa** dibuja la sección en la capa (o la profundidad fija) del mapa como una curva con las mismas herramientas:
-  por ejemplo, v en superficie a lo largo de una sección.
+  una corriente; la unidad de la integral es la de y por metro: m/s → m²/s). Se indican también los cambios de signo; con
+  **Restar** un valor, los cruces de y con ese valor (con una curva de temperatura y Restar = 16, la posición del
+  frente). Una curva casi constante se dibuja plana (el eje no amplía diferencias de 1e-6). En una variable 3D, el
+  interruptor **Solo en el nivel del mapa** dibuja la sección en la capa (o la profundidad fija) del mapa como una curva
+  con las mismas herramientas: por ejemplo, v en superficie a lo largo de una sección. Con el mapa en **profundidad de
+  isosuperficie**, la curva es la profundidad h(x) de esa isosuperficie (en m, media de la ventana si se promedia): por
+  ejemplo, el ajuste de ln(H − h) de la isoterma en el ajuste geostrófico.
 
 ### Diagnósticos en un cuaderno: transporte, vorticidad y función de corriente
 
@@ -304,11 +318,12 @@ Para los puntos del mapa (series del netCDF) o para las **estaciones** (fichero 
 espectro de Welch con banda de confianza del 95 %, espectro **rotatorio** de u+iv (horario y antihorario:
 las oscilaciones inerciales del hemisferio norte son horarias) y **wavelet** de Morlet con el cono de
 influencia sombreado, el contorno de significación al 95 % frente a ruido rojo y el espectro global. Las
-líneas punteadas marcan M2, S2, K1, O1 y el periodo inercial de la latitud (en los dominios cartesianos, el del
-f del modelo: lat0 en plano f, f0 + βy en plano β). Hay una wavelet por cada punto o estación seleccionado, con el
+líneas punteadas marcan el periodo inercial de la latitud (en los dominios cartesianos, el del f del modelo: lat0 en
+plano f, f0 + βy en plano β) y, solo si el caso tiene marea, sus constituyentes (M2, S2, K1, O1...). Hay una wavelet por cada punto o estación seleccionado, con el
 color de su serie, para comparar cuándo llega la energía a cada uno. La pestaña indica los periodos
 resolubles (entre 2 veces el intervalo de muestreo y un cuarto del registro): con salidas horarias de dos
-días no hay espectro útil; usa estaciones o registros más largos.
+días no hay espectro útil; usa estaciones o registros más largos. Con pocos días el Welch no llega a periodos largos
+(con 3 días, unas 18 h), pero la wavelet sí los muestra.
 
 
 

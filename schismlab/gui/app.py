@@ -1882,7 +1882,8 @@ def page_model():
                     _turb0 = 3
                 if _turb0 not in _topts:                                              # itur = 1, 2, 4: válidos en SCHISM, se conservan
                     _topts[_turb0] = f"itur = {_turb0}"
-                turb = ui.select(_topts, value=_turb0, label=t["turb"]).classes("sl-w-md")
+                turb = ui.select(_topts, value=_turb0, label=t["turb"]).classes("sl-w-md").mark("turb_select")
+                turb_2d = ui.label(t["turb_2d"]).classes("text-caption text-grey-7").mark("turb_2d")
                 _cor0 = ph.get("coriolis", "f-plane"); _cor0 = "none" if _cor0 in (False, 0, None, "0", "false") else _cor0
                 cor = ui.select(["f-plane", "beta", "none"], value=safe_select(["f-plane", "beta", "none"], _cor0, "f-plane", label=t["coriolis"]), label=t["coriolis"]).classes("sl-w-sm")
                 ref = c.get("reference", {})
@@ -1903,7 +1904,10 @@ def page_model():
                 dfv = ui.number(t["dfv0"], value=_dfv0, min=0, format="%g").classes("sl-w-md").mark("dfv0")
                 dfh = ui.number(t["dfh0"], value=_dfh0, min=0, format="%g").classes("sl-w-md").mark("dfh0")
                 ui.label(t["dfv0_hint"]).classes("text-caption text-grey-7 col")
-            turb.on_value_change(lambda e: dfrow.set_visibility(e.value == 0)); dfrow.set_visibility(turb.value == 0)
+            def turb_vis():                                        # Lite: en 2D SCHISMlab pone itur = 0 y el cierre se oculta (Pro lo deja elegir)
+                is2d = vt.value == "2d" and not is_pro()
+                turb.set_visibility(not is2d); turb_2d.set_visibility(is2d); dfrow.set_visibility(turb.value == 0 and not is2d)
+            turb.on_value_change(lambda e: turb_vis()); vt.on_value_change(lambda e: turb_vis()); turb_vis()
             # Igual que Setup.geographic: dominio real o idealizado en lon/lat -> ics=2, ncor=1 (Coriolis completo)
             mc_ = c.get("mesh", {}) or {}
             geo_dom = mc_.get("generator", default_generator()) != "idealized" or ("lon" in mc_ and "lat" in mc_)
@@ -1913,8 +1917,10 @@ def page_model():
             else:
                 ui.label(t["cor_approx"]).classes("text-caption text-orange-9")
             def model_caption():
-                set_caption(exp_model, (t["baroclinic_s"] if baro.value else t["barotropic_s"]) + " · " + str(_topts.get(turb.value, turb.value)) + ("" if geo_dom else f" · Coriolis {cor.value}"))
-            baro.on_value_change(lambda e: model_caption()); turb.on_value_change(lambda e: model_caption()); cor.on_value_change(lambda e: model_caption()); model_caption()
+                set_caption(exp_model, (t["baroclinic_s"] if baro.value else t["barotropic_s"]) + ("" if (vt.value == "2d" and not is_pro()) else " · " + str(_topts.get(turb.value, turb.value)))
+                            + ("" if geo_dom else f" · Coriolis {cor.value}"))
+            baro.on_value_change(lambda e: model_caption()); turb.on_value_change(lambda e: model_caption()); cor.on_value_change(lambda e: model_caption())
+            vt.on_value_change(lambda e: model_caption()); model_caption()
         with ui.expansion(t["ic"], icon="water", value=True).classes("sl-exp w-full") as exp_ic:
             ui.label(t["ic_hint"]).classes("text-caption text-grey-7")
             _icsrc = ic.get("source") or {}
@@ -3213,7 +3219,7 @@ def _results_content(tab_key: str):
             ui.label(t["compare_hint"]).classes("text-caption text-grey-7")
             if _copts:
                 with ui.row().classes("row wrap q-col-gutter-sm items-center"):
-                    osel = ui.select(_copts, value=next(iter(_copts)), label=t["case"]).classes("sl-w-md")
+                    osel = ui.select(_copts, value=next(iter(_copts)), label=t["case"], with_input=True).classes("sl-w-md")
                     ccol = ui.column().classes("w-full")
                 def _odir(v):
                     from ..case import Case

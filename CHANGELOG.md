@@ -3,6 +3,41 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.7.4 (2026-10-27) — Arreglos pedidos al repetir las prácticas
+
+Lecturas que daban números distintos:
+
+- Perfil y hodógrafa: en el transporte y en el ajuste, «hasta 0» (o vacío) es la superficie libre. Con η > 0 el nivel
+  de superficie quedaba fuera de la integral (P6: Tx 3.51 en vez de 4.08 m²/s). «Desde» vacío es el fondo.
+- Secciones: el número de puntos depende de la longitud del corte y de la malla (dos por elemento en el tramo más fino,
+  de 120 a 2000). Con 120 fijos, un pulso de 20 km en una sección de 1000 km salía con 1.75 m en vez de 1.87 m (P3).
+- Con **Restar** un valor, las lecturas dan dónde la curva cruza ese valor (con Restar = 16 en la temperatura, el frente).
+- Con el mapa en **profundidad de isosuperficie**, *Solo en el nivel del mapa* dibuja h(x) de la isosuperficie a lo
+  largo del corte, con el ajuste y la integral (P4: ajuste de ln(H − h)).
+- Unidades: las series de `transport` en Puntos van en m²/s y la integral de una velocidad en m²/s (antes «m/s·m»).
+- La variable de Secciones sigue a la del mapa hasta que se elige otra a mano (antes se quedaba en la del principio).
+- Batimetrías analíticas (talud, escalón, canal, plataforma, monte) en dominios en lon/lat: x, y, x0… en metros desde
+  la esquina SW, como en las expresiones (antes recibían grados y la plataforma quedaba a h_shelf en todo el dominio).
+
+Presentación:
+
+- Espectro: las líneas de marea solo se dibujan si el caso tiene marea (tapaban la inercial).
+- Comparar: el mapa de diferencias tiene el rojo en los valores positivos, como el de elevación.
+- Física: en 2D no se muestra el cierre turbulento (SCHISMlab pone itur = 0).
+- Barras de color: el 0 sale como 0 (no −2.2e-17) y la densidad con decimales. La escala de `elevation` solo se centra
+  en 0 si hay valores a los dos lados (con un nivel medio de 0.46 m el mapa salía de un color).
+- Curvas casi constantes (u en un canal sin rotación) se dibujan planas: el eje no amplía diferencias de 1e-6.
+- Isolíneas de las secciones sin las de los extremos: ya no salen líneas verticales en el agua fría casi uniforme.
+- Series: la media de cada serie en la ventana va en una tabla bajo la figura (en el título se cortaba) y hay 16
+  colores distintos para los puntos.
+- Selectores «Componente del mapa», «Componente en las series» y «Componente en la sección».
+- Eje de las secciones: «distancia desde el extremo oeste (O)»; la nota gris del Hovmöller ya no tapa el eje.
+- Perfil y hodógrafa: la hodógrafa no dibuja el nivel del fondo (velocidad nula) y, si la viscosidad cambia en el tramo
+  del ajuste (k-kl), avisa de que De y Az suponen A_z constante.
+- Partículas en casos 2D: empiezan sobre `depthAverageVel`.
+- Ayuda: sentido del signo de 1/α, `shapiro0` = 0.5 para frentes estrechos (P6), periodos largos con registros
+  cortos, filtrar la lista de Comparar escribiendo; la de sigma-z dice que h_s es el nivel z menos profundo.
+
 ## 0.7.3 (2026-10-26) — Viscosidad constante en Física
 
 - Física → Modelo: con el cierre turbulento «ninguno» aparecen la viscosidad vertical A_z (`dfv0`) y la difusividad

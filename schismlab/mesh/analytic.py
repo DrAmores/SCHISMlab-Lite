@@ -60,8 +60,17 @@ def analytic_depth(kind: str = "flat", **p):
          = 'shelf'  : plataforma h_shelf hasta x_shelf, talud lineal hasta h_deep en x_shelf + L_slope
          = 'seamount': h - A*exp(-((x-x0)^2+(y-y0)^2)/(2 r^2))
          = 'expression': formula numpy libre (cadena) con x, y en metros desde la esquina SW y, en dominios lon/lat,
-                         también lon, lat en grados; `origin=(lon0, lat0, lat_media)` indica que la malla está en grados.
+                         también lon, lat en grados.
+    `origin=(lon0, lat0, lat_media)` indica que la malla está en grados: en todos los tipos x, y (y x0, x_step, r…) van
+    en metros desde la esquina SW.
     """
+    origin = p.pop("origin", None)
+    if origin is not None and kind != "expression":   # malla en grados: el fondo se evalúa en m desde la esquina SW
+        f_m = analytic_depth(kind, **p)
+        lon0, lat0, latm = (float(v) for v in origin)
+        R = 6371e3
+        return lambda x, y: f_m(np.deg2rad(np.asarray(x, float) - lon0) * R * np.cos(np.deg2rad(latm)),
+                                np.deg2rad(np.asarray(y, float) - lat0) * R)
     def coord(x, y):
         return y if p.get("axis", "x") == "y" else x
     if kind == "flat":
@@ -81,7 +90,7 @@ def analytic_depth(kind: str = "flat", **p):
         h, A, x0, y0, r = p.get("h", 1000.0), p.get("A", 800.0), p.get("x0", 0.0), p.get("y0", 0.0), p.get("r", 1.0)
         return lambda x, y: h - A * np.exp(-((x - x0) ** 2 + (y - y0) ** 2) / (2 * r ** 2))
     if kind == "expression":
-        return _expression_depth(p.get("formula"), p.get("origin"))
+        return _expression_depth(p.get("formula"), origin)
     raise ValueError(f"fondo analitico desconocido: {kind}")
 
 

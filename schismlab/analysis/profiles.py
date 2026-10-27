@@ -32,6 +32,8 @@ def ekman_readouts(z, u, v, wind=None, ref=None, fit=(-28.0, 0.0), integ=None, f
     wind:  (τx, τy) o dirección del viento (cualquier vector paralelo); sin él no hay ángulos respecto al viento.
     fit:   rango de z (m, negativo abajo) del ajuste de ln|v_E| frente a z: pendiente 1/De.
     integ: rango de z de la integral de u_E, v_E (None = toda la columna).
+    En los dos rangos, un extremo superior >= 0 significa «hasta la superficie libre» (con η > 0 el nivel de superficie
+    está por encima de z = 0) y uno inferior None, «desde el fondo».
     f:     parámetro de Coriolis (para Az = |f| De² / 2).
 
     Devuelve: uE, vE (perfiles), surface (|v_E(0)|), surface_angle (respecto al viento, + a la derecha),
@@ -43,7 +45,12 @@ def ekman_readouts(z, u, v, wind=None, ref=None, fit=(-28.0, 0.0), integ=None, f
     o = np.argsort(z); z, u, v = z[o], u[o], v[o]
     ur, vr = (0.0, 0.0) if ref is None else (float(ref[0]), float(ref[1]))
     uE, vE = u - ur, v - vr
-    out = dict(z=z, uE=uE, vE=vE, surface=float(np.hypot(uE[-1], vE[-1])), surface_u=float(uE[-1]), surface_v=float(vE[-1]))
+    out = dict(z=z, uE=uE, vE=vE, surface=float(np.hypot(uE[-1], vE[-1])), surface_u=float(uE[-1]), surface_v=float(vE[-1]),
+               bottom_still=bool(np.hypot(u[0], v[0]) == 0.0))                 # nivel del fondo de SCHISM: u = v = 0
+    def rng(r):
+        lo, hi = (min(r), max(r)) if None not in r else (r[0], r[1])
+        lo = -np.inf if lo is None else float(lo); hi = np.inf if (hi is None or float(hi) >= 0) else float(hi)
+        return lo, hi
     if wind is not None and np.hypot(*wind) > 0:
         out["surface_angle"] = angle_right(uE[-1], vE[-1], *wind)
     # inversión: el ángulo relativo a la corriente de superficie llega a 180° (de la superficie hacia abajo)
@@ -53,7 +60,7 @@ def ekman_readouts(z, u, v, wind=None, ref=None, fit=(-28.0, 0.0), integ=None, f
     out["z_reverse"] = float(np.interp(180.0, [abs(rel[k[0] - 1]), abs(rel[k[0]])], [zz[k[0] - 1], zz[k[0]]])) if len(k) and k[0] > 0 else None
     # ajuste ln|v_E| = ln V0 + z/De en el rango pedido
     mod = np.hypot(uE, vE)
-    lo, hi = min(fit), max(fit)
+    lo, hi = rng(tuple(fit))
     m = (z >= lo) & (z <= hi) & (mod > 0)
     out["n_fit"] = int(m.sum())
     if m.sum() >= 2:
@@ -63,7 +70,10 @@ def ekman_readouts(z, u, v, wind=None, ref=None, fit=(-28.0, 0.0), integ=None, f
         if f is not None and out["De"]:
             out["Az"] = float(abs(f) * out["De"] ** 2 / 2.0)
     # transporte: integral (trapecios) en el rango
-    mi = np.ones_like(z, bool) if integ is None else (z >= min(integ)) & (z <= max(integ))
+    if integ is None:
+        mi = np.ones_like(z, bool)
+    else:
+        a, b = rng(tuple(integ)); mi = (z >= a) & (z <= b)
     if mi.sum() >= 2:
         out["Tx"] = float(np.trapezoid(uE[mi], z[mi])); out["Ty"] = float(np.trapezoid(vE[mi], z[mi]))
         if wind is not None and np.hypot(*wind) > 0 and np.hypot(out["Tx"], out["Ty"]) > 0:

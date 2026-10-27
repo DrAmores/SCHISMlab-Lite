@@ -9,9 +9,13 @@ from scipy.stats import chi2
 OMEGA_SIDEREAL = 7.292115e-5
 
 
-def reference_periods(lat: float | None = None) -> dict:
-    """Periodos de referencia en horas: constituyentes de marea y periodo inercial de la latitud."""
-    p = {"M2": 12.4206, "S2": 12.0, "N2": 12.6583, "K1": 23.9345, "O1": 25.8193}
+TIDE_PERIODS_H = {"M2": 12.4206, "S2": 12.0, "N2": 12.6583, "K1": 23.9345, "O1": 25.8193}
+
+
+def reference_periods(lat: float | None = None, tides=None) -> dict:
+    """Periodos de referencia en horas: constituyentes de marea y periodo inercial de la latitud. `tides`: las
+    constituyentes que fuerzan el caso (solo esas se dibujan; lista vacía = ninguna; None = todas)."""
+    p = dict(TIDE_PERIODS_H) if tides is None else {k: v for k, v in TIDE_PERIODS_H.items() if k in {str(c).upper() for c in tides}}
     if lat is not None and abs(lat) > 1e-3:
         f = 2 * OMEGA_SIDEREAL * np.sin(np.deg2rad(lat))
         p["inercial"] = 2 * np.pi / abs(f) / 3600

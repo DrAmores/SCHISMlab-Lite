@@ -110,6 +110,16 @@ def color_range(values, zmin=None, zmax=None, min_rel: float = 1e-6):
     return lo, hi, fmt
 
 
+def zero_ticks(lo, hi, n: int = 6):
+    """Marcas de una barra de color como múltiplos enteros de un paso «redondo»: el 0 sale exacto (Plotly acumula el
+    paso y escribía −2.22e-17 en el centro de las escalas simétricas). None si no hay rango."""
+    if lo is None or hi is None or not (np.isfinite(lo) and np.isfinite(hi)) or hi <= lo:
+        return None
+    raw = (hi - lo) / max(n, 1); e = 10 ** np.floor(np.log10(raw)); step = e * min((1, 2, 2.5, 5, 10), key=lambda m: abs(m * e - raw))
+    k0, k1 = int(np.ceil(lo / step - 1e-9)), int(np.floor(hi / step + 1e-9))
+    return [float(np.round(k * step, 12)) if k else 0.0 for k in range(k0, k1 + 1)]
+
+
 def _aspect(y):
     return 1 / np.cos(np.deg2rad(np.mean(y))) if np.ptp(y) < 180 else 1.0
 
@@ -181,8 +191,18 @@ def dataset_range(ds: xr.Dataset, var: str, layer: int = -1) -> tuple[float, flo
     sample = [_values(ds, var, i, layer) for i in range(0, ds.time.size, max(1, ds.time.size // 8))]
     a = np.stack(sample)
     if var == "elevation":
-        m = float(np.nanpercentile(np.abs(a), 99)); return -m, m
+        return elevation_range(a)
     return float(np.nanpercentile(a, 1)), float(np.nanpercentile(a, 99))
+
+
+def elevation_range(a) -> tuple[float, float]:
+    """Escala de η: centrada en 0 si el campo tiene valores a los dos lados; si no (nivel medio de 0.46 m que oscila
+    unos cm), del percentil 1 al 99, para que el mapa no salga de un solo color."""
+    a = np.asarray(a, float)
+    lo, hi = float(np.nanpercentile(a, 1)), float(np.nanpercentile(a, 99))
+    if lo < 0 < hi or hi <= lo:
+        m = float(np.nanpercentile(np.abs(a), 99)); return -m, m
+    return lo, hi
 
 
 def series_figure(ds: xr.Dataset, var: str, node: int, layer: int = -1, extra: dict | None = None) -> go.Figure:
@@ -338,7 +358,7 @@ def difference_figure(ds: xr.Dataset, ds2: xr.Dataset, var: str, it: int, layer:
     v2 = _on_nodes(ds2, ds, _values(ds2, var, it2, min(layer, ds2.sizes.get("layer", 1) - 1)))
     d = v1 - v2; lim = float(np.nanmax(np.abs(d))) or 1.0
     fig = field_figure(ds.x.values, ds.y.values, ds.attrs["elements"], d, f"Δ {var}", f"{var}: este caso − {other_name} · {np.datetime_as_string(ds.time.values[it], 'm')}",
-                       cmap="RdBu", zmin=-lim, zmax=lim)
+                       cmap="RdBu_r", zmin=-lim, zmax=lim)            # rojo = positivo, como el mapa de elevation
     return fig
 
 
@@ -363,7 +383,7 @@ def sst_compare_figure(ds: xr.Dataset, res: dict, lang: str = "es") -> go.Figure
     fig = make_subplots(rows=1, cols=3, subplot_titles=("satélite" if lang == "es" else "satellite", "modelo" if lang == "es" else "model", "modelo − satélite" if lang == "es" else "model − satellite"), horizontal_spacing=0.06)
     lo = float(np.nanmin([np.nanmin(res["obs"]), np.nanmin(res["model"])])); hi = float(np.nanmax([np.nanmax(res["obs"]), np.nanmax(res["model"])]))
     d = res["model"] - res["obs"]; lim = float(np.nanmax(np.abs(d[np.isfinite(d)]))) if np.isfinite(d).any() else 1.0
-    for col, (vals, cmap, zmin, zmax) in enumerate(((res["obs"], "Viridis", lo, hi), (res["model"], "Viridis", lo, hi), (d, "RdBu", -lim, lim)), 1):
+    for col, (vals, cmap, zmin, zmax) in enumerate(((res["obs"], "Viridis", lo, hi), (res["model"], "Viridis", lo, hi), (d, "RdBu_r", -lim, lim)), 1):
         gx, gy, gz = grid_field(x, y, el, np.nan_to_num(vals, nan=np.nan), n=220)
         fig.add_trace(go.Heatmap(x=gx, y=gy, z=gz, colorscale=cmap, zmin=zmin, zmax=zmax, showscale=(col != 2), colorbar=dict(x=0.63 if col == 1 else 1.0, len=0.9)), row=1, col=col)
         fig.update_yaxes(scaleanchor=f"x{col if col > 1 else ''}", scaleratio=_aspect(y), row=1, col=col)
@@ -493,6 +513,22 @@ def map_arrows(ds, it: int, layer: int = -1, n: int = 28, depth_m: float | None 
     return arrows_trace(X.ravel(), Y.ravel(), dx, dy, color="#111", width=1), vmax
 
 
+def times_m(units: str) -> str:
+    """Unidades de ∫ y dx con x en m: m/s → m²/s, m²/s → m³/s, °C → °C·m."""
+    if not units:
+        return "m"
+    for a, b in (("m²/s", "m³/s"), ("m/s", "m²/s"), ("m²", "m³")):
+        if units == a:
+            return b
+    if units == "m":
+        return "m²"
+    return units + "·m"
+
+
+_COMPASS_NAMES = {"es": {"N": "norte", "S": "sur", "E": "este", "O": "oeste", "NE": "noreste", "NO": "noroeste", "SE": "sureste", "SO": "suroeste"},
+                  "en": {"N": "north", "S": "south", "E": "east", "W": "west", "NE": "northeast", "NW": "northwest", "SE": "southeast", "SW": "southwest"}}
+
+
 def section_ends(fig, sec, lang: str = "es", heatmap: bool = True):
     """Rotula los extremos de una sección (O/E, S/N... según su rumbo) y el eje «distancia (km) desde O»."""
     from ..analysis.sections import compass
@@ -501,7 +537,8 @@ def section_ends(fig, sec, lang: str = "es", heatmap: bool = True):
     for x_, txt, anc in ((0.0, a, "left"), (1.0, b, "right")):
         fig.add_annotation(x=x_, y=1.0, xref="paper", yref="paper", text=f"<b>{txt}</b>", showarrow=False, xanchor=anc, yanchor="bottom",
                            font=dict(size=12, color="#555"))
-    fig.update_xaxes(title_text=(f"distancia desde el extremo {a} (km)" if lang == "es" else f"distance from the {a} end (km)"))
+    full = _COMPASS_NAMES["es" if lang == "es" else "en"].get(a, a)
+    fig.update_xaxes(title_text=(f"distancia desde el extremo {full} ({a}) (km)" if lang == "es" else f"distance from the {full} ({a}) end (km)"))
     return fig
 
 
@@ -512,7 +549,7 @@ def section_line_figure(sec, y, ylabel: str, lang: str = "es", dark: bool = Fals
     (figura, lecturas: dict con fit, integral, unidades y cruces por cero)."""
     from ..analysis.profiles import line_fit, line_integral, zero_crossings
     y = np.asarray(y, float); d = np.asarray(sec.dist, float)
-    info = dict(zeros=zero_crossings(d, y))
+    info = dict(zeros=zero_crossings(d, y - ref), zeros_ref=float(ref))    # con Restar: dónde y cruza ese valor (un frente)
     yy = np.abs(y - ref) if log else y - ref
     fig = go.Figure(go.Scatter(x=d, y=yy, mode="lines", line=dict(width=2, color="#0e9aa7"), name=ylabel,
                                hovertemplate="%{x:.1f} km<br>%{y:.4g}<extra></extra>"))
@@ -526,14 +563,20 @@ def section_line_figure(sec, y, ylabel: str, lang: str = "es", dark: bool = Fals
                                      name="ajuste" if lang == "es" else "fit", hoverinfo="skip"))
     if integ is not None:
         I = line_integral(d, y, integ[0], integ[1])
-        info["integral"] = I; info["integral_units"] = (units + "·m").replace("m²/s·m", "m³/s") if units else "·m"
+        info["integral"] = I; info["integral_units"] = times_m(units)
         if I is not None:
             a, b = min(integ), max(integ)
             fig.add_vrect(x0=a, x1=b, fillcolor="rgba(216,84,43,0.10)", line_width=0)
     if not log and np.nanmin(yy) < 0 < np.nanmax(yy):
         fig.add_hline(y=0, line=dict(color="#999", width=1))
     ytitle = (f"|{ylabel} − {ref:g}|" if ref else f"|{ylabel}|") if log else (f"{ylabel} − {ref:g}" if ref else ylabel)
-    fig.update_layout(yaxis=dict(title=ytitle, type="log" if log else "linear"), showlegend=False, **layout(dark))
+    yax = dict(title=ytitle, type="log" if log else "linear")
+    if not log:                                   # curva casi constante: rango mínimo (no dibujar diferencias de 1e-6 como forma)
+        lo, hi, fmt = color_range(yy, min_rel=1e-4)
+        a_ = yy[np.isfinite(yy)]
+        if a_.size and (hi - lo) > np.ptp(a_) * 1.5:
+            yax.update(range=[lo, hi], tickformat=fmt)
+    fig.update_layout(yaxis=yax, showlegend=False, **layout(dark))
     if title:
         fig.update_layout(title=dict(text=title, font=dict(size=12)))
     return section_ends(fig, sec, lang), info
@@ -556,11 +599,17 @@ def section_figure2(sec, var: str, it: int, arrows: bool = True, contours: bool 
     zmin, zmax = (zrange if zrange else (float(np.nanmin(Z)), float(np.nanmax(Z))))
     cs = cs or ("RdYlBu_r" if var == "temperature" else ("RdBu_r" if var in ("verticalVelocity",) else "Viridis"))
     fig = go.Figure(go.Heatmap(x=sec.dist, y=zi, z=Z, colorscale=cs, zmin=zmin, zmax=zmax, zsmooth="best",
-                               colorbar=dict(title=clabel or label(var, lang), thickness=14, tickformat=".3g"),
+                               colorbar=dict(title=clabel or label(var, lang), thickness=14, tickvals=zero_ticks(zmin, zmax),
+                                             tickformat=color_range(Z, zmin, zmax)[2] if max(abs(zmin), abs(zmax)) >= 100 else ".3g"),
                                hovertemplate="%{x:.1f} km<br>z %{y:.1f} m<br>%{z:.3f}<extra></extra>"))
     if contours and np.isfinite(Z).any() and zmax > zmin:
-        fig.add_trace(go.Contour(x=sec.dist, y=zi, z=Z, showscale=False, contours=dict(coloring="none", start=zmin, end=zmax, size=(zmax - zmin) / 10),
-                                 line=dict(color="rgba(0,0,0,0.45)", width=1), hoverinfo="skip", showlegend=False))
+        # isolíneas cada décimo de la escala, sin las que quedan a menos de un 3 % de los extremos de los datos: en el agua
+        # casi uniforme (fría, bajo la termoclina) las diferencias de centésimas dibujaban líneas verticales sin sentido
+        lo_d, hi_d = float(np.nanmin(Z)), float(np.nanmax(Z)); size = (zmax - zmin) / 10; mg = 0.03 * (hi_d - lo_d)
+        c0 = zmin + size * np.ceil((lo_d + mg - zmin) / size - 1e-9); c1 = hi_d - mg
+        if c1 >= c0:
+            fig.add_trace(go.Contour(x=sec.dist, y=zi, z=Z, showscale=False, contours=dict(coloring="none", start=c0, end=c1, size=size),
+                                     line=dict(color="rgba(0,0,0,0.45)", width=1), hoverinfo="skip", showlegend=False))
     if arrows:
         try:
             us, un, w = sec.velocity(it) if vel is None else (vel[0], None, vel[1])
@@ -609,7 +658,8 @@ def iso_hovmoller_figure(sec, var: str, value: float, title: str, lang: str = "e
     lay = layout(dark); lay["plot_bgcolor"] = "#9e9e9e"
     fig.update_layout(xaxis_title="distancia (km)" if lang == "es" else "distance (km)", yaxis_title="tiempo" if lang == "es" else "time", **lay)
     if not np.isfinite(H).all():
-        fig.add_annotation(x=0.5, y=-0.16, xref="paper", yref="paper", showarrow=False, font=dict(size=10, color="#555"),
+        fig.update_layout(margin=dict(b=100))                     # la nota va debajo del título del eje x, sin taparlo
+        fig.add_annotation(x=0.5, y=-0.34, xref="paper", yref="paper", showarrow=False, font=dict(size=10, color="#555"),
                            text=("gris: la isosuperficie no corta la columna (aflora o queda bajo el fondo)" if lang == "es"
                                  else "grey: the isosurface does not cross the water column (outcrops or lies below the bottom)"))
     return section_ends(fig, sec, lang)

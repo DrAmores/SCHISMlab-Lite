@@ -8,7 +8,7 @@ import matplotlib.tri as mtri
 import plotly.graph_objects as go
 from nicegui import ui, run
 
-from .figures import _values, _aspect, dataset_range, themed, LABELS, LAYOUT
+from .figures import zero_ticks, _values, _aspect, dataset_range, themed, LABELS, LAYOUT
 from .explorer import CLICK_JS
 from ..analysis.particles import track as track_particles, release_points, is_geographic
 
@@ -57,7 +57,10 @@ def particles_tab(ds, c: dict, wd: Path, t: dict, lang: str, est, dark: bool = F
     nvrt = int(ds.sizes.get("layer", 1))
     vars_ = [v for v in est.vars if (v in ds or (v + "X") in ds) and "node" in (ds[v].dims if v in ds else ds[v + "X"].dims)]
     g = _Grid(ds)
-    S = {"var": est.var if est.var in vars_ else (vars_[0] if vars_ else None), "layer": nvrt - 1, "start": 0, "k": 0, "tr": None,
+    _v0 = est.var if est.var in vars_ else (vars_[0] if vars_ else None)
+    if nvrt <= 2 and _v0 == "elevation" and "depthAverageVel" in vars_:   # 2D: las partículas sobre la corriente que las mueve
+        _v0 = "depthAverageVel"
+    S = {"var": _v0, "layer": nvrt - 1, "start": 0, "k": 0, "tr": None,
          "its": None, "zr": None, "bg": "field", "isob": False, "want": None}
     _o = Path(wd) / "outputs"
     _stamp = max((f.stat().st_mtime for f in _o.glob("out2d_*.nc")), default=0.0) if _o.is_dir() else 0.0
@@ -137,7 +140,7 @@ def particles_tab(ds, c: dict, wd: Path, t: dict, lang: str, est, dark: bool = F
             lo, hi = zrange()
             cmap = "RdBu_r" if v == "elevation" else "Viridis"
             heat = go.Heatmap(x=g.xi, y=g.yi, z=g.z(_values(ds, v, it, S["layer"])), colorscale=cmap, zmin=lo, zmax=hi, zsmooth="best",
-                              colorbar=dict(title=LABELS.get(v, v), thickness=14, tickformat=".3g"), hoverinfo="skip")
+                              colorbar=dict(title=LABELS.get(v, v), thickness=14, tickformat=".3g", tickvals=zero_ticks(lo, hi)), hoverinfo="skip")
         fig = go.Figure(heat)
         tr, k = S["tr"], S["k"]
         if tr is not None:

@@ -64,13 +64,14 @@ def build_mesh(case: Case, outdir: Path | None = None, plot: bool = True) -> Mes
 
 def _depth_callable(b, cfg: dict | None = None):
     """`bathymetry` idealizada: numero (fondo plano) o {kind: ..., params}; {kind: expression, formula: "..."} evalúa una
-    fórmula numpy (x, y en m desde la esquina SW; lon, lat en grados si el dominio está en lon/lat)."""
+    fórmula numpy. En todos los tipos x, y van en m desde la esquina SW, también si el dominio está en lon/lat (las
+    expresiones reciben además lon, lat en grados)."""
     if isinstance(b, (int, float)):
         return analytic_depth("flat", h=float(b))
     if not isinstance(b, dict):
         raise ValueError("mesh.bathymetry idealizada: número o {kind: flat|slope|step|channel|shelf|seamount|expression, ...}")
     b = dict(b); kind = b.pop("kind", "flat")
-    if kind == "expression" and cfg and cfg.get("lon") is not None and cfg.get("lat") is not None:
+    if cfg and cfg.get("lon") is not None and cfg.get("lat") is not None:   # malla en grados: x, y en m desde la esquina SW
         lon, lat = cfg["lon"], cfg["lat"]
         b["origin"] = (float(lon[0]), float(lat[0]), 0.5 * (float(lat[0]) + float(lat[1])))
     return analytic_depth(kind, **b)

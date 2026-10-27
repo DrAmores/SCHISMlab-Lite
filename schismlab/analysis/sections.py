@@ -75,13 +75,33 @@ def compass(dx: float, dy: float, lang: str = "es") -> str:
     return names[k]
 
 
+def auto_npts(ds, tri, p0, p1, nmin: int = 120, nmax: int = 2000) -> int:
+    """Puntos de una sección: dos por elemento en el tramo de malla más fino que cruza (aristas en m), entre nmin y nmax.
+    Con 120 fijos, una sección de 1000 km sobre una plataforma de 2 km recortaba un pulso de 20 km de ancho."""
+    xs = np.linspace(p0[0], p1[0], 400); ys = np.linspace(p0[1], p1[1], 400)
+    ie = tri.get_trifinder()(xs, ys); ie = np.unique(ie[ie >= 0])
+    if ie.size == 0:
+        return nmin
+    vx, vy = metric_xy(ds, ds.x.values[tri.triangles[ie]].ravel(), ds.y.values[tri.triangles[ie]].ravel())
+    vx = vx.reshape(-1, 3); vy = vy.reshape(-1, 3)
+    edge = np.max(np.hypot(vx - np.roll(vx, 1, axis=1), vy - np.roll(vy, 1, axis=1)), axis=1)
+    h = float(np.percentile(edge, 5))
+    mx, my = metric_xy(ds, np.array([p0[0], p1[0]]), np.array([p0[1], p1[1]]))
+    L = float(np.hypot(mx[1] - mx[0], my[1] - my[0]))
+    return int(np.clip(np.ceil(2.0 * L / max(h, 1e-6)) + 1, nmin, nmax))
+
+
 class Section:
     """Corte vertical a lo largo de la recta p0-p1 con `npts` puntos (interpolación lineal en cada triángulo)."""
 
-    def __init__(self, ds: xr.Dataset, p0, p1, npts: int = 120, vg=None, tri=None):
-        """`tri`: Triangulation de matplotlib ya construida (con su buscador) para reutilizarla entre secciones."""
+    def __init__(self, ds: xr.Dataset, p0, p1, npts: int | None = None, vg=None, tri=None):
+        """`tri`: Triangulation de matplotlib ya construida (con su buscador) para reutilizarla entre secciones.
+        `npts`: puntos del corte; None = según la longitud y la malla (dos por elemento del tramo más fino, 120–2000)."""
         self.ds, self.vg = ds, vg
         self.p0, self.p1 = (float(p0[0]), float(p0[1])), (float(p1[0]), float(p1[1]))
+        tri = tri if tri is not None else mtri.Triangulation(ds.x.values, ds.y.values, ds.attrs["elements"])
+        if npts is None:
+            npts = auto_npts(ds, tri, self.p0, self.p1)
         self.xs = np.linspace(self.p0[0], self.p1[0], npts); self.ys = np.linspace(self.p0[1], self.p1[1], npts)
         xm, ym = metric_xy(ds, self.xs, self.ys)
         self.dist = np.hypot(xm - xm[0], ym - ym[0]) / 1e3                      # km
@@ -89,7 +109,6 @@ class Section:
         L = max(np.hypot(dx, dy), 1e-9)
         self.tangent = (dx / L, dy / L)                                           # (este, norte)
         self.normal = (-dy / L, dx / L)                                           # a la izquierda del avance
-        tri = tri if tri is not None else mtri.Triangulation(ds.x.values, ds.y.values, ds.attrs["elements"])
         finder = tri.get_trifinder()                                              # matplotlib lo cachea en la triangulación
         ie = finder(self.xs, self.ys)
         self.inside = ie >= 0

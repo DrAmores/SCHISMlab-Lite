@@ -3,17 +3,20 @@ con series y perfiles, secciones arrastrables (y presets transversal/longitudina
 animaciones y exportación. Pestaña Espectro: Welch, rotatorio y wavelet de los puntos o de las estaciones."""
 from __future__ import annotations
 import re
+from html import escape as html_escape
 from pathlib import Path
 import numpy as np
 import plotly.graph_objects as go
 from nicegui import run, ui
-from .figures import (LAYOUT, LABELS, label, layout, themed, NodeSampler, _aspect, dataset_range, _values, map_arrows, arrow_field, arrow_units, arrows_trace, profile_figure, profile_figure2,
+from .figures import (LAYOUT, LABELS, label, zero_ticks, color_range, elevation_range, layout, themed, NodeSampler, _aspect, dataset_range, _values, map_arrows, arrow_field, arrow_units, arrows_trace, profile_figure, profile_figure2,
                       section_figure2, section_line_figure, hovmoller_figure, iso_hovmoller_figure, psd_figure, rotary_figure, wavelet_figure, land_polygons, land_traces, boundary_traces)
 from ..analysis.sections import Section, preset_section, field_at_depth, is_geographic
 from ..analysis.signal import point_series, psd_welch, rotary_spectrum, wavelet_morlet, reference_periods, regularize, resolvable_periods
 
 from ..edition import default_generator
-from .brand import SERIES as COLORS   # colores de puntos y secciones: los de la marca
+from .brand import SERIES as _SERIES
+# colores de los puntos: los 8 de la marca y 8 más, distintos entre sí (P4 usa 11 puntos: no se repiten hasta el 17)
+COLORS = list(_SERIES) + ["#e6a100", "#1f77b4", "#c2185b", "#00897b", "#8d6e63", "#9e9d24", "#5c6bc0", "#f06292"]
 PLOTLY_CONFIG = {"modeBarButtonsToAdd": ["drawline", "eraseshape"], "displaylogo": False, "scrollZoom": True}
 # plotly_click lleva la traza entera (z del mapa de calor, >1 MB) y el websocket lo rechaza: solo se envían x, y de los puntos
 CLICK_JS = "(e) => emit({points: (e.points || []).map(p => ({x: p.x, y: p.y}))})"
@@ -147,6 +150,8 @@ class ExplorerState:
         a = np.asarray(a, float); a = a[np.isfinite(a)]
         if a.size == 0:
             return None
+        if var == "elevation":
+            r = elevation_range(a); return r if r[1] > r[0] else None
         if self.signed(var):
             m = float(np.nanpercentile(np.abs(a), 99)); return (-m, m) if m > 0 else None
         lo, hi = float(np.nanpercentile(a, 1)), float(np.nanpercentile(a, 99))
@@ -296,15 +301,25 @@ def map_figure(st: ExplorerState, t: dict, lang: str):
         if st.zmanual is not None:
             zmin, zmax = st.zmanual
         elif sym and zmin is None and np.isfinite(Z).any():
-            m = float(np.nanmax(np.abs(Z))); zmin, zmax = -m, m
+            if var == "elevation":
+                zmin, zmax = elevation_range(Z)
+            else:
+                m = float(np.nanmax(np.abs(Z))); zmin, zmax = -m, m
         cs = ("RdBu_r" if sym else default_cmap(var)) if st.cmap == "auto" else st.cmap
         lvl = (f"{st.depth_m:g} m" if st.depth_mode == "depth" else st.layer_text(st.layer, t)) if st.is3d(var) else ""
         title = f"{label_} · {st.window_text(lang) if st.window is not None else when}" + (f" · {lvl}" if lvl else "")
+    _fin = Z[np.isfinite(Z)] if np.size(Z) else np.array([])
+    _lo = zmin if zmin is not None else (float(_fin.min()) if _fin.size else None)
+    _hi = zmax if zmax is not None else (float(_fin.max()) if _fin.size else None)
+    ticks = zero_ticks(_lo, _hi)
+    tfmt = ".3g"
+    if _lo is not None and _hi is not None and max(abs(_lo), abs(_hi)) >= 100:      # densidad 1025–1027: decimales, no «1.03e+3»
+        tfmt = color_range(_fin, _lo, _hi)[2]
     fig = go.Figure(go.Heatmap(x=st.sampler.xi, y=st.sampler.yi, z=Z, colorscale=cs, zmin=zmin, zmax=zmax, zsmooth="best",
-                               colorbar=dict(title=label_, thickness=14, tickformat=".3g"),
+                               colorbar=dict(title=label_, thickness=14, tickformat=tfmt, tickvals=ticks),
                                hovertemplate=("%{x:.4f}, %{y:.4f}" if st.geo else "x %{x:.0f} m, y %{y:.0f} m") + "<br>%{z:.4g}<extra></extra>"))
     C = st.contour_grid(it)
-    st._frame = dict(z=Z, zmin=zmin, zmax=zmax, title=title, C=C)   # para la vía rápida (Plotly 6 codifica z en binario)
+    st._frame = dict(z=Z, zmin=zmin, zmax=zmax, title=title, C=C, ticks=ticks)   # para la vía rápida (Plotly 6 codifica z en binario)
     ctr = contour_trace(C, st.sampler.xi, st.sampler.yi, st.contour_step, st.dark) if C is not None else None
     if ctr is not None:                                    # isolíneas: siempre la traza 1 (refresh_map_time la actualiza)
         fig.add_trace(ctr)
@@ -426,7 +441,8 @@ def series_figure_multi(st: ExplorerState, var: str, lang: str, wd: Path | None 
                 lines.append((np.asarray(t_), np.asarray(comps[k], float), p["color"]))
         ytitle = label(var, lang)
         if vector and comp != "mag":
-            ytitle = "u (este), v (norte) (m/s)" if lang == "es" else "u (east), v (north) (m/s)"
+            un = VECTOR_UNITS.get(var) or st.F.units(var) or "m/s"                  # transporte: m²/s
+            ytitle = f"u (este), v (norte) ({un})" if lang == "es" else f"u (east), v (north) ({un})"
         fig.update_layout(yaxis_title=ytitle, hovermode="x unified", **layout(st.dark))
         if vector and comp in ("uv", "u", "v"):
             fig.add_hline(y=0, line=dict(color="#999", width=1))
@@ -437,21 +453,23 @@ def series_figure_multi(st: ExplorerState, var: str, lang: str, wd: Path | None 
     if st.window is not None and len(st.window) and lines:              # promedio entre t1 y t2: banda y media de cada serie
         tt = np.asarray(st.ds.time.values); a, b = tt[st.window[0]], tt[st.window[-1]]
         fig.add_vrect(x0=a, x1=b, fillcolor="rgba(120,120,120,0.12)", line_width=0)
-        notes = []
+        notes = []; means = []
         for (t_, y_, col), tr in zip(lines, [d for d in fig.data]):
             t_ = np.asarray(t_); m = (t_ >= a) & (t_ <= b)
             if m.any():
                 mu = float(np.nanmean(np.asarray(y_, float)[m]))
                 fig.add_trace(go.Scatter(x=[a, b], y=[mu, mu], mode="lines", line=dict(color=col, width=2, dash="dot"), showlegend=False,
                                          hovertemplate=f"{tr.name}: {'media' if lang == 'es' else 'mean'} %{{y:.4g}}<extra></extra>"))
-                notes.append(f"{tr.name} {mu:.4g}")
+                notes.append(f"{tr.name} {mu:.4g}"); means.append((tr.name, mu, col))
         lines_mean = len(notes)
-        if notes:
-            fig.update_layout(title=dict(text=("media " if lang == "es" else "mean ") + st.window_text(lang).split("(", 1)[-1].rstrip(")") + ": " + " · ".join(notes),
+        if notes:                                  # el título solo dice la ventana; las medias van en la tabla bajo la figura
+            fig.update_layout(title=dict(text=("media " if lang == "es" else "mean ") + st.window_text(lang).split("(", 1)[-1].rstrip(")"),
                                          font=dict(size=11)))
         st._mean_traces = lines_mean
+        st.series_means = means
     else:
         st._mean_traces = 0
+        st.series_means = []
     st.series_lines = lines
     shapes0 = list(fig.layout.shapes or []); fig.layout.shapes = ()
     xs, ys, tc = series_cursor(st)
@@ -537,7 +555,13 @@ def ekman_profile(st: ExplorerState, node: int, its, ref_mode: str = "level", k:
     if "viscosity" in ds:
         a = np.asarray(ds.viscosity.isel(node=node, time=its).values, float)
         visc = np.nanmean(np.where(a < -9000, np.nan, a), axis=0) if a.ndim == 2 else a
-    return dict(r, u=u, v=v, zraw=z, visc=visc, wind=wind, f=f, ref=ref, ref_txt=ref_txt, n=len(its))
+    vr = None
+    if visc is not None and r.get("De"):                     # viscosidad en el tramo del ajuste: ¿es constante?
+        lo, hi = min(fit), max(fit); hi = np.inf if hi >= 0 else hi
+        vv = np.asarray(visc, float)[(z >= lo) & (z <= hi)]; vv = vv[np.isfinite(vv) & (vv > 0)]
+        if vv.size >= 2:
+            vr = (float(vv.min()), float(vv.max()))
+    return dict(r, u=u, v=v, zraw=z, visc=visc, visc_range=vr, wind=wind, f=f, ref=ref, ref_txt=ref_txt, n=len(its))
 
 
 def ekman_figures(d: dict, lang: str = "es", theory=None):
@@ -560,9 +584,11 @@ def ekman_figures(d: dict, lang: str = "es", theory=None):
     pf.update_layout(**LAYOUT)
     pf.update_layout(legend=dict(orientation="h", x=0, y=1.0, yanchor="bottom"), margin=dict(l=50, r=20, t=70, b=50))
     hf = go.Figure()
-    uE, vE = d["uE"], d["vE"]
+    uE, vE, zE = d["uE"], d["vE"], d["z"]
+    if d.get("bottom_still") and len(zE) > 2:          # el nivel del fondo (u = v = 0) restado sería un punto suelto (−u_ref, −v_ref)
+        uE, vE, zE = uE[1:], vE[1:], zE[1:]
     hf.add_trace(go.Scatter(x=uE, y=vE, mode="lines+markers", name="modelo" if es else "model", marker=dict(size=5),
-                            text=[f"z = {zz:.1f} m" for zz in d["z"]], hovertemplate="%{text}<br>u_E %{x:.4f}<br>v_E %{y:.4f}<extra></extra>"))
+                            text=[f"z = {zz:.1f} m" for zz in zE], hovertemplate="%{text}<br>u_E %{x:.4f}<br>v_E %{y:.4f}<extra></extra>"))
     if theory is not None and theory[0] > 0 and theory[1] > 0:
         from ..analysis.profiles import theoretical_spiral
         wd_ = d["wind"] if d.get("wind") and np.hypot(*d["wind"]) > 0 else (1.0, 0.0)
@@ -597,6 +623,10 @@ def ekman_text(d: dict, lang: str = "es") -> str:
         az = f" → Az = |f| De²/2 = {d['Az']:.4g} m²/s" if d.get("Az") else ""
         L.append((f"Ajuste de ln|v_E| ({d['n_fit']} niveles): De = {d['De']:.3g} m, V0 = {d['V0_fit']:.4g} m/s{az}" if es
                   else f"Fit of ln|v_E| ({d['n_fit']} levels): De = {d['De']:.3g} m, V0 = {d['V0_fit']:.4g} m/s{az}"))
+        vr = d.get("visc_range")
+        if vr and vr[1] > 1.5 * vr[0]:                     # k-kl: A_z cambia en el tramo; De y Az del ajuste no son los de la teoría
+            L.append((f"Aviso: el ajuste supone A_z constante, y en ese tramo la viscosidad va de {vr[0]:.2g} a {vr[1]:.2g} m²/s" if es
+                      else f"Warning: the fit assumes constant A_z, but in that range the viscosity goes from {vr[0]:.2g} to {vr[1]:.2g} m²/s"))
     if d.get("Tx") is not None:
         a = (f", a {d['T_angle']:.1f}° a la derecha del viento" if es else f", {d['T_angle']:.1f}° to the right of the wind") if d.get("T_angle") is not None else ""
         L.append((f"Transporte (∫ u_E dz, ∫ v_E dz): Tx = {d['Tx']:.4g} m²/s, Ty = {d['Ty']:.4g} m²/s{a}" if es
@@ -623,8 +653,11 @@ def line_readout(info: dict, units: str, lang: str = "es") -> str:
         extra = f" = {I / 1e6:.4g} Sv" if u == "m³/s" else ""
         out.append((f"Integral a lo largo de la sección: {I:.4g} {u}{extra}") if es else (f"Integral along the section: {I:.4g} {u}{extra}"))
     if info.get("zeros"):
-        z = ", ".join(f"{x:.1f}" for x in info["zeros"][:6])
-        out.append((f"Cambios de signo en: {z} km") if es else (f"Sign changes at: {z} km"))
+        z = ", ".join(f"{x:.1f}" for x in info["zeros"][:6]); r0 = info.get("zeros_ref") or 0.0
+        if r0:
+            out.append((f"Cruces con y = {r0:g} en: {z} km") if es else (f"Crossings of y = {r0:g} at: {z} km"))
+        else:
+            out.append((f"Cambios de signo en: {z} km") if es else (f"Sign changes at: {z} km"))
     return "\n".join(out)
 
 
@@ -713,7 +746,7 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         with ui.card().classes("q-pa-md").style("flex:0 0 300px;max-width:100%"):
             ui.label(t["m_color"]).classes("text-subtitle2")
             var = ui.select({v: var_name(v, lang) for v in st.vars}, value=st.var, label=t["variable"]).classes("w-full").mark("var_select")
-            mcomp = ui.select({"mag": t["comp_mag"], "u": t["comp_u"], "v": t["comp_v"]}, value="mag", label=t["component"]) \
+            mcomp = ui.select({"mag": t["comp_mag"], "u": t["comp_u"], "v": t["comp_v"]}, value="mag", label=t["component_map"]) \
                 .classes("w-full").mark("map_component")
             dmode = ui.select({"layer": t["by_layer"], "depth": t["by_depth"], "iso": t["by_iso"]}, value="layer", label=t["level"]).classes("w-full")
             with ui.column().classes("w-full q-pt-md") as lsl_box:
@@ -765,8 +798,9 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             with ui.column().classes("col-12 col-md-9"):
                 st.component = "uv"
                 comp_sel = ui.select({"uv": t["comp_uv"], "u": t["comp_u"], "v": t["comp_v"], "mag": t["comp_mag"]}, value="uv",
-                                     label=t["component"]).props("dense").classes("sl-w-md").mark("component_select")
+                                     label=t["component_series"]).props("dense").classes("sl-w-md").mark("component_select")
                 sfig = ui.plotly(series_figure_multi(st, st.var, lang, wd)).classes("w-full").style("height:320px").mark("series_plot")
+                smeans = ui.html("").classes("w-full text-body2").mark("series_means")
                 pfig = ui.plotly(go.Figure()).classes("w-full").style("height:300px")
         with ui.row().classes("q-gutter-sm"):
             ui.button(t["download_series"], icon="download", on_click=lambda: export_series()).props("flat dense")
@@ -807,7 +841,7 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
                     sec_vars = list(st.vars)                                      # 3D: corte vertical; 2D y derivadas: perfil a lo largo del corte
                     svar = ui.select({v: var_name(v, lang) for v in sec_vars}, value=st.var if st.var in sec_vars else sec_vars[0], label=t["variable"]).classes("sl-w-md").mark("sec_var")
                     scomp = ui.select({"mag": t["comp_mag"], "u": t["comp_u"], "v": t["comp_v"], "normal": t["comp_normal"], "tangential": t["comp_tangential"]},
-                                      value="mag", label=t["component"]).classes("sl-w-md").mark("sec_component")
+                                      value="mag", label=t["component_sec"]).classes("sl-w-md").mark("sec_component")
                     scont = ui.switch(t["contours"], value=True)
                     slev = ui.switch(t["sec_atlevel"], value=False).mark("sec_atlevel")
                     wf = ui.number(t["wfactor"], value=200, min=1, step=50).classes("sl-w-sm")
@@ -851,6 +885,7 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             for k in ("zmin", "zmax"):
                 if f.get(k) is not None:
                     upd[k] = [float(f[k])]
+            upd["colorbar.tickvals"] = [f.get("ticks")]
             plot.run_plot_method("restyle", upd, [0])
             plot.run_plot_method("relayout", {"title.text": f["title"]})
         except Exception:   # noqa: BLE001  (sin navegador o cliente antiguo: ruta de respaldo)
@@ -900,9 +935,18 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         st.points.pop(i); recolor(); refresh_points_list(); refresh_map(); refresh_series()
     def is_vector(v):
         return (v + "X") in ds
+    def update_series_fig():
+        sfig.update_figure(series_figure_multi(st, st.var, lang, wd))
+        mm = getattr(st, "series_means", [])
+        if not mm:
+            smeans.set_content(""); smeans.set_visibility(False); return
+        head = t["series_means"].format(w=st.window_text(lang))
+        cells = "".join(f'<span style="display:inline-block;margin:2px 14px 2px 0;white-space:nowrap"><span style="color:{c}">●</span> '
+                        f'{html_escape(str(n))}: <b>{mu:.4g}</b></span>' for n, mu, c in mm)
+        smeans.set_content(f'<div><span class="text-grey-7">{html_escape(head)}</span><br>{cells}</div>'); smeans.set_visibility(True)
     def refresh_series():
         comp_sel.set_visibility(is_vector(st.var))
-        sfig.update_figure(series_figure_multi(st, st.var, lang, wd))
+        update_series_fig()
         refresh_profile(); refresh_ekman()
     prof_range = {}
     def refresh_profile():
@@ -941,8 +985,10 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             return
         try:
             p = st.points[-1]; node = p["node"]; its = st.its()
-            d = ekman_profile(st, node, its, ek_ref.value, int(ek_k.value or 0), (float(ek_f1.value or -28), float(ek_f2.value or 0)),
-                              None if (ek_i1.value is None or ek_i2.value is None) else (float(ek_i1.value), float(ek_i2.value)), lang=lang)
+            # vacío: «desde el fondo» / «hasta la superficie»; hasta 0 (o más) también es hasta la superficie libre
+            i1 = None if ek_i1.value is None else float(ek_i1.value); i2 = None if ek_i2.value is None else float(ek_i2.value)
+            d = ekman_profile(st, node, its, ek_ref.value, int(ek_k.value or 0), (float(ek_f1.value if ek_f1.value is not None else -28), float(ek_f2.value or 0)),
+                              None if (i1 is None and i2 is None) else (i1, i2), lang=lang)
             theory = (float(ek_v0.value or 0), float(ek_de.value or 1)) if ek_th.value else None
             pf, hf = ekman_figures(d, lang, theory)
             when = st.window_text(lang) if st.window is not None else np.datetime_as_string(ds.time.values[st.it], "m").replace("T", " ")
@@ -993,8 +1039,14 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             F, z, vel = section_values(st, s, sv, st.its(), comp)
             clabel = label(sv, lang, comp)
             slev.set_visibility(F.ndim == 2)
-            if F.ndim == 2 and slev.value:                         # curva en el nivel del mapa (capa o profundidad fija)
-                if st.depth_mode == "depth":
+            iso_curve = False
+            if F.ndim == 2 and slev.value:                         # curva en el nivel del mapa (capa, profundidad fija o isosuperficie)
+                if st.iso_ok():                                    # h(x): profundidad de la isosuperficie del mapa (media de la ventana)
+                    from ..analysis.isosurface import section_iso_depth
+                    with np.errstate(all="ignore"):
+                        F = np.nanmean([section_iso_depth(s["sec"], st.var, st.iso_value, i) for i in st.its()], axis=0)
+                    clabel = st.iso_label(lang); iso_curve = True
+                elif st.depth_mode == "depth":
                     from ..analysis.sections import interp_at_depth
                     F = interp_at_depth(F, z, st.depth_m); clabel += f" · {st.depth_m:g} m"
                 else:
@@ -1003,7 +1055,7 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             title = f"{s['name']} · {clabel} · {when}"
             line_box.set_visibility(F.ndim == 1)
             if F.ndim == 1:                                       # variable 2D o derivada: perfil con ajuste e integral
-                units = (VECTOR_UNITS.get(sv) if st.is_vector(sv) else None) or st.F.units(sv)
+                units = "m" if iso_curve else ((VECTOR_UNITS.get(sv) if st.is_vector(sv) else None) or st.F.units(sv))
                 fig, info = section_line_figure(s["sec"], F, clabel, lang, st.dark, log=bool(llog.value), ref=float(lref.value or 0.0),
                                                 fit=(float(lf1.value or 0), float(lf2.value or 0)) if lfit.value else None,
                                                 integ=(float(li1.value or 0), float(li2.value or 0)) if lint.value else None,
@@ -1054,7 +1106,7 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             sfig.run_plot_method("restyle", {"x": [[x_] for x_ in xs], "y": [[y_] for y_ in ys]}, list(range(off, off + n)))
             sfig.run_plot_method("relayout", {"shapes[0].x0": tc, "shapes[0].x1": tc})
         except Exception:   # noqa: BLE001  (figura cambiada mientras tanto: se redibuja)
-            sfig.update_figure(series_figure_multi(st, st.var, lang, wd))
+            update_series_fig()
     pend = {"it": None}
     def on_time(e):
         """Al arrastrar la barra llegan decenas de valores: se guarda el último y un temporizador dibuja solo ese
@@ -1082,7 +1134,7 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             st.mcomp = "mag"
         mcomp.set_visibility(st.is_vector(st.var))
         refresh_range()
-        refresh_map(); refresh_series()
+        refresh_map(); refresh_series(); follow_map_var()
         if state_sec["active"] is not None and st.depth_mode == "iso":
             show_section(state_sec["active"], switch=False)
     def on_layer(e):
@@ -1250,8 +1302,21 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
     tsl.on_value_change(on_time)
     tlabel.on("keydown.enter", lambda e: goto_time()); tlabel.on("blur", lambda e: goto_time())
     ui.timer(0.08, render_time)
-    comp_sel.on_value_change(lambda e: (setattr(st, "component", e.value), sfig.update_figure(series_figure_multi(st, st.var, lang, wd))))
-    svar.on_value_change(lambda e: show_section(state_sec["active"])); scont.on_value_change(lambda e: show_section(state_sec["active"])); wf.on_value_change(lambda e: show_section(state_sec["active"]))
+    comp_sel.on_value_change(lambda e: (setattr(st, "component", e.value), update_series_fig()))
+    sec_follow = {"on": True, "prog": False}
+    def on_svar(e):
+        if not sec_follow["prog"]:                                  # elegida a mano: deja de seguir al mapa (vuelve si coincide)
+            sec_follow["on"] = e.value == st.var
+        if state_sec["active"] is not None:
+            show_section(state_sec["active"], switch=not sec_follow["prog"])
+    def follow_map_var():
+        if sec_follow["on"] and st.var in sec_vars and svar.value != st.var:
+            sec_follow["prog"] = True
+            try:
+                svar.set_value(st.var)
+            finally:
+                sec_follow["prog"] = False
+    svar.on_value_change(on_svar); scont.on_value_change(lambda e: show_section(state_sec["active"])); wf.on_value_change(lambda e: show_section(state_sec["active"]))
     for w_ in (scomp, slev, llog, lref, lfit, lf1, lf2, lint, li1, li2):
         w_.on_value_change(lambda e: show_section(state_sec["active"], switch=False) if state_sec["active"] is not None else None)
     scomp.set_visibility(st.is_vector(svar.value)); line_box.set_visibility(False)
@@ -1280,6 +1345,26 @@ def station_vars(wd: Path) -> dict:
     return out
 
 
+def case_tides(c) -> list[str]:
+    """Constituyentes de marea que fuerzan el caso (bloques `tides:` en cualquier parte del YAML); [] si no hay marea."""
+    out: list[str] = []; pot: list = []
+    def walk(o):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if k == "tides" and v:
+                    cons = v.get("constituents", ["M2"]) if isinstance(v, dict) else (v if isinstance(v, list) else ["M2"])
+                    out.extend(str(x).upper() for x in cons if str(x).upper() not in out)
+                elif k == "tidal_potential" and v:
+                    pot.append(True)
+                else:
+                    walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+    walk(c or {})
+    return out or (["M2", "S2", "N2", "K1", "O1"] if pot else [])
+
+
 def spectrum_tab(ds, c: dict, wd: Path, t: dict, lang: str, st: ExplorerState):
     from ..analysis import read_stations
     sta_vars = station_vars(wd) if (wd / "station.in").exists() else {}
@@ -1290,6 +1375,7 @@ def spectrum_tab(ds, c: dict, wd: Path, t: dict, lang: str, st: ExplorerState):
             sta_names = list(read_stations(wd, "elev").columns)
         except Exception:   # noqa: BLE001  (staout ilegible)
             has_sta = False
+    tides = case_tides(c)
     ui.label(t["spectrum_hint"]).classes("text-caption text-grey-7")
     with ui.row().classes("row wrap q-col-gutter-sm items-center w-full"):
         src = ui.select({"points": t["src_points"], "stations": t["src_stations"]}, value="points", label=t["ic_source"]).classes("sl-w-lg").mark("spectrum_src"); src.set_visibility(has_sta)
@@ -1367,7 +1453,7 @@ def spectrum_tab(ds, c: dict, wd: Path, t: dict, lang: str, st: ExplorerState):
             t0 = s["t"][0]
             tt = (np.datetime64(t0) + (tu * 1e9).astype("timedelta64[ns]")) if np.issubdtype(np.asarray(s["t"]).dtype, np.datetime64) else tu / 3600
             sf.add_trace(go.Scatter(x=tt, y=y, mode="lines", name=name, line=dict(color=color, width=1.5)))
-            refs = reference_periods(lat_of(name))
+            refs = reference_periods(lat_of(name), tides=tides)               # mareas: solo si fuerzan el caso
             refs = {k_: v_ for k_, v_ in refs.items() if tmin / 3600 <= v_ <= tmax / 3600 * 1.5}
             if n < 16:
                 continue
