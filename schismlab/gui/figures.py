@@ -140,8 +140,9 @@ def field_figure(x, y, elements, values, label: str, title: str = "", cmap="Viri
         zmax = float(np.nanmax(np.abs(Z))); zmin = -zmax
     geo = bool(np.nanmax(np.abs(x)) <= 360 and np.nanmax(np.abs(y)) <= 90.5)    # lon/lat o metros (dominios idealizados)
     hov = "lon %{x:.3f}<br>lat %{y:.3f}<br>%{z:.3f}<extra></extra>" if geo else "x %{x:.0f} m<br>y %{y:.0f} m<br>%{z:.3f}<extra></extra>"
+    ticks = zero_ticks(zmin, zmax) if (zmin is not None and zmax is not None and zmin < 0 < zmax) else None
     fig = go.Figure(go.Heatmap(x=xi, y=yi, z=Z, colorscale=cmap, zmin=zmin, zmax=zmax, zsmooth="best",
-                               colorbar=dict(title=label, thickness=14, tickformat=".3g"), hovertemplate=hov))
+                               colorbar=dict(title=label, thickness=14, tickformat=".3g", tickvals=ticks), hovertemplate=hov))
     if boundaries:
         for (bx, by, color) in boundaries:
             fig.add_trace(go.Scatter(x=bx, y=by, mode="lines", line=dict(color=color, width=2), hoverinfo="skip", showlegend=False))
@@ -191,15 +192,21 @@ def dataset_range(ds: xr.Dataset, var: str, layer: int = -1) -> tuple[float, flo
     sample = [_values(ds, var, i, layer) for i in range(0, ds.time.size, max(1, ds.time.size // 8))]
     a = np.stack(sample)
     if var == "elevation":
-        return elevation_range(a)
+        return elevation_range(a, per_instant=True)
     return float(np.nanpercentile(a, 1)), float(np.nanpercentile(a, 99))
 
 
-def elevation_range(a) -> tuple[float, float]:
+def elevation_range(a, per_instant: bool = False) -> tuple[float, float]:
     """Escala de η: centrada en 0 si el campo tiene valores a los dos lados; si no (nivel medio de 0.46 m que oscila
-    unos cm), del percentil 1 al 99, para que el mapa no salga de un solo color."""
+    unos cm), del percentil 1 al 99, para que el mapa no salga de un solo color. Con per_instant (filas de `a` =
+    instantes), el mínimo es la mediana de los percentiles 1 de cada instante: el reposo inicial (η = 0) y la rampa
+    no estiran la escala fija hasta 0."""
     a = np.asarray(a, float)
-    lo, hi = float(np.nanpercentile(a, 1)), float(np.nanpercentile(a, 99))
+    a2 = a.reshape(a.shape[0], -1) if (per_instant and a.ndim > 1) else a.reshape(1, -1)
+    ok = np.isfinite(a2).any(axis=1)
+    if not ok.any():
+        return -1.0, 1.0
+    lo = float(np.nanmedian(np.nanpercentile(a2[ok], 1, axis=1))); hi = float(np.nanmax(np.nanpercentile(a2[ok], 99, axis=1)))
     if lo < 0 < hi or hi <= lo:
         m = float(np.nanpercentile(np.abs(a), 99)); return -m, m
     return lo, hi
@@ -385,7 +392,7 @@ def sst_compare_figure(ds: xr.Dataset, res: dict, lang: str = "es") -> go.Figure
     d = res["model"] - res["obs"]; lim = float(np.nanmax(np.abs(d[np.isfinite(d)]))) if np.isfinite(d).any() else 1.0
     for col, (vals, cmap, zmin, zmax) in enumerate(((res["obs"], "Viridis", lo, hi), (res["model"], "Viridis", lo, hi), (d, "RdBu_r", -lim, lim)), 1):
         gx, gy, gz = grid_field(x, y, el, np.nan_to_num(vals, nan=np.nan), n=220)
-        fig.add_trace(go.Heatmap(x=gx, y=gy, z=gz, colorscale=cmap, zmin=zmin, zmax=zmax, showscale=(col != 2), colorbar=dict(x=0.63 if col == 1 else 1.0, len=0.9)), row=1, col=col)
+        fig.add_trace(go.Heatmap(x=gx, y=gy, z=gz, colorscale=cmap, zmin=zmin, zmax=zmax, showscale=(col != 2), colorbar=dict(x=0.63 if col == 1 else 1.0, len=0.9, tickvals=zero_ticks(zmin, zmax) if col == 3 else None)), row=1, col=col)
         fig.update_yaxes(scaleanchor=f"x{col if col > 1 else ''}", scaleratio=_aspect(y), row=1, col=col)
     fig.update_layout(height=420, margin=dict(l=30, r=30, t=50, b=30), title=f"SST {res['date']} · {'sesgo' if lang == 'es' else 'bias'} {res['bias']:+.2f} °C · RMSE {res['rmse']:.2f} °C · r = {res['corr']:.2f}")
     return fig
@@ -665,6 +672,14 @@ def iso_hovmoller_figure(sec, var: str, value: float, title: str, lang: str = "e
     return section_ends(fig, sec, lang)
 
 
+def _signed_ticks(Z, zr: dict):
+    """Marcas con el 0 exacto si la escala cruza el 0 (rango dado o el de los datos); None si no lo cruza."""
+    lo, hi = zr.get("zmin"), zr.get("zmax")
+    if lo is None and np.isfinite(Z).any():
+        lo, hi = float(np.nanmin(Z)), float(np.nanmax(Z))
+    return zero_ticks(lo, hi) if (lo is not None and lo < 0 < hi) else None
+
+
 def hovmoller_figure(sec, var: str, layer: int = -1, lang: str = "es", dark: bool = False, H=None, clabel: str | None = None,
                      signed: bool = False) -> go.Figure:
     """Diagrama distancia–tiempo de `var` en la capa `layer`; H (tiempo, distancia) ya calculado para componentes,
@@ -675,7 +690,8 @@ def hovmoller_figure(sec, var: str, layer: int = -1, lang: str = "es", dark: boo
         m = float(np.nanpercentile(np.abs(H), 99)); zr = dict(zmin=-m, zmax=m) if m > 0 else {}
     cs = "RdBu_r" if signed else ("RdYlBu_r" if var == "temperature" else "Viridis")
     fig = go.Figure(go.Heatmap(x=sec.dist, y=sec.ds.time.values, z=H, colorscale=cs, zsmooth="best", **zr,
-                               colorbar=dict(title=clabel or label(var, lang), thickness=14, tickformat=".3g"), hovertemplate="%{x:.1f} km<br>%{y}<br>%{z:.4g}<extra></extra>"))
+                               colorbar=dict(title=clabel or label(var, lang), thickness=14, tickformat=".3g", tickvals=_signed_ticks(H, zr)),
+                               hovertemplate="%{x:.1f} km<br>%{y}<br>%{z:.4g}<extra></extra>"))
     fig.update_layout(xaxis_title="distancia (km)" if lang == "es" else "distance (km)", yaxis_title="tiempo" if lang == "es" else "time", **layout(dark))
     return section_ends(fig, sec, lang)
 

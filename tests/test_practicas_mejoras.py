@@ -118,3 +118,44 @@ async def test_cierre_turbulento_en_2d(user: User, tmp_path):
         await user.should_see(marker="turb_select"); await user.should_not_see(marker="turb_2d")
     else:                                                                        # Lite: en 2D se oculta (itur = 0)
         await user.should_see(marker="turb_2d"); await user.should_not_see(marker="turb_select")
+
+
+# 0.7.5: repetición con Lite 0.7.4 (mejoras_herramienta.md, 27/10/2026)
+
+async def test_promedio_lee_la_fecha_del_navegador(user: User, tmp_path, monkeypatch):
+    """Intro en t2 aplica el texto que manda el navegador aunque el valor del campo en el servidor sea el anterior
+    (la última tecla no llegó): antes la media seguía con la ventana vieja."""
+    from schismlab.gui import state
+    from test_explorer import make_case
+    monkeypatch.setattr(state, "USER_CASES", tmp_path / "cases")
+    p = make_case(tmp_path / "cases")
+    await user.open(f"/results?case={p}&tab=maps")
+    await user.should_see("Puntos")
+    user.find(marker="avg_switch").elements.pop().set_value(True)
+    a = user.find(marker="avg_from").elements.pop().value
+    full = user.find(marker="avg_text").elements.pop().text
+    t2 = a[:11] + "02:00"
+    user.find(marker="avg_to").trigger("keydown.enter", args=t2)              # el servidor aún tiene la fecha final
+    assert user.find(marker="avg_to").elements.pop().value == t2
+    txt = user.find(marker="avg_text").elements.pop().text
+    assert txt != full and "02:00)" in txt
+
+
+def test_escalas_con_cero_y_elevacion_sin_reposo_inicial():
+    from schismlab.gui.figures import elevation_range, _signed_ticks, difference_figure
+    # instantes: reposo (η = 0), rampa y nivel 0.36–0.56 m: la escala fija no baja hasta 0
+    a = np.stack([np.zeros(200), np.linspace(0.1, 0.2, 200)] + [np.linspace(0.36, 0.56, 200)] * 6)
+    lo, hi = elevation_range(a, per_instant=True); assert lo > 0.3 and hi == pytest.approx(0.558, abs=0.01)
+    assert elevation_range(np.linspace(0.36, 0.56, 200).reshape(10, 20))[0] == pytest.approx(0.362, abs=0.01)  # un instante en rejilla
+    tv = _signed_ticks(np.array([[-4.4e-5, 3e-5]]), {}); assert 0.0 in tv
+    assert _signed_ticks(np.array([[1.0, 2.0]]), {}) is None
+
+
+def test_eje_de_la_vista_previa_de_fisica():
+    from schismlab.gui.ic_builder import section_figure
+    from schismlab.forcing.vgrid import VGrid
+    X, Y = np.meshgrid(np.linspace(5e3, 105e3, 21), np.linspace(0, 50e3, 11))
+    frame = {"x": X.ravel(), "y": Y.ravel(), "lon": X.ravel() * 0, "lat": Y.ravel() * 0 + 40}
+    fig = section_figure(frame, np.full(X.size, 100.0), VGrid.sigma(10), {"value": "10 + z / 10"}, "x", "T", "es")
+    assert fig.layout.xaxis.title.text == "distancia desde el extremo oeste (O) (km)"
+    assert float(np.min(fig.data[0].x)) == 0.0 and float(np.max(fig.data[0].x)) == pytest.approx(100.0)

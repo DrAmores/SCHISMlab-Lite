@@ -127,11 +127,13 @@ def section_figure(frame: dict, depth: np.ndarray, vg, fields: dict, axis: str, 
     for i in range(s.size):
         Z[:, i] = np.interp(zi, z[i], f[i], left=np.nan, right=np.nan)
     lo, hi, fmt = color_range(Z)
+    s = s - s[0]                                                  # distancia desde el extremo oeste (o sur), como en Secciones
     fig = go.Figure(go.Heatmap(x=s / 1e3, y=zi, z=Z, colorscale="Viridis", zmin=lo, zmax=hi, colorbar=dict(title=label, thickness=14, tickformat=fmt),
                                hovertemplate="%{x:.1f} km<br>z %{y:.1f} m<br>%{z:.3f}<extra></extra>"))
     fig.add_trace(go.Scatter(x=s / 1e3, y=-h, mode="lines", line=dict(color="#5d4037", width=2), hoverinfo="skip", showlegend=False))
-    dirn = ("O→E" if axis == "x" else "S→N") if lang == "es" else ("W→E" if axis == "x" else "S→N")
-    fig.update_layout(xaxis=dict(title=("distancia (km) " if lang == "es" else "distance (km) ") + dirn), yaxis=dict(title="z (m)"), **_layout(dark))
+    xt = ((f"distancia desde el extremo {'oeste (O)' if axis == 'x' else 'sur (S)'} (km)") if lang == "es"
+          else f"distance from the {'west (W)' if axis == 'x' else 'south (S)'} end (km)")
+    fig.update_layout(xaxis=dict(title=xt), yaxis=dict(title="z (m)"), **_layout(dark))
     return fig
 
 

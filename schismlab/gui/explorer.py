@@ -146,12 +146,13 @@ class ExplorerState:
             a = self.field(var, self.it)
         else:
             its = list(range(0, self.ds.time.size, max(1, self.ds.time.size // 6)))
-            a = np.concatenate([self.field(var, i) for i in its])
-        a = np.asarray(a, float); a = a[np.isfinite(a)]
+            a = np.stack([np.ravel(self.field(var, i)) for i in its])
+        a = np.asarray(a, float)
+        if var == "elevation" and np.isfinite(a).any():
+            r = elevation_range(a, per_instant=a.ndim > 1); return r if r[1] > r[0] else None
+        a = a[np.isfinite(a)]
         if a.size == 0:
             return None
-        if var == "elevation":
-            r = elevation_range(a); return r if r[1] > r[0] else None
         if self.signed(var):
             m = float(np.nanpercentile(np.abs(a), 99)); return (-m, m) if m > 0 else None
         lo, hi = float(np.nanpercentile(a, 1)), float(np.nanpercentile(a, 99))
@@ -759,7 +760,7 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             with ui.column().classes("w-full q-gutter-xs") as avg_box:
                 avg_a = ui.input(t["avg_from"], value=_t0).props("dense outlined").classes("w-full").mark("avg_from")
                 avg_b = ui.input(t["avg_to"], value=_t1).props("dense outlined").classes("w-full").mark("avg_to")
-                avg_n = ui.label().classes("text-caption text-grey-7")
+                avg_n = ui.label().classes("text-caption text-grey-7").mark("avg_text")
             avg_box.set_visibility(False)
             with ui.expansion(t["map_style"], icon="palette", value=True).classes("sl-exp w-full q-mt-sm"):
                 bg = ui.select({"field": t["bg_field"], "resolution": t["bg_resolution"], "depth": t["bg_depth"]}, value="field", label=t["background"]).classes("w-full")
@@ -837,7 +838,7 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
                     def arm(mode):                                   # el siguiente clic en el mapa traza la sección (sin herramienta de línea)
                         armed["mode"] = mode; st.pending = None; st.click_mode = "armed"; refresh_map(); ui.notify(t["sec_click_wait"], timeout=2500)
                     ui.button(t["sec_transversal"], icon="swap_vert", on_click=lambda: arm("transversal")).props("outline dense color=primary").mark("sec_transversal")
-                    ui.button(t["sec_longitudinal"], icon="swap_horiz", on_click=lambda: arm("longitudinal")).props("outline dense color=primary")
+                    ui.button(t["sec_longitudinal"], icon="swap_horiz", on_click=lambda: arm("longitudinal")).props("outline dense color=primary").mark("sec_longitudinal")
                     sec_vars = list(st.vars)                                      # 3D: corte vertical; 2D y derivadas: perfil a lo largo del corte
                     svar = ui.select({v: var_name(v, lang) for v in sec_vars}, value=st.var if st.var in sec_vars else sec_vars[0], label=t["variable"]).classes("sl-w-md").mark("sec_var")
                     scomp = ui.select({"mag": t["comp_mag"], "u": t["comp_u"], "v": t["comp_v"], "normal": t["comp_normal"], "tangential": t["comp_tangential"]},
@@ -1266,8 +1267,15 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
     zlo.on_value_change(lambda e: set_manual()); zhi.on_value_change(lambda e: set_manual())
     def on_mcomp(e):
         st.mcomp = e.value or "mag"; refresh_range(); refresh_map()
-    def set_window():
-        """Activa o actualiza el promedio entre las dos fechas (índices de las salidas incluidas)."""
+    def typed(w, e):
+        """Copia en el campo el texto que hay en el navegador al pulsar Intro o salir: si el servidor reenvía el campo
+        mientras se escribe, la última tecla puede no llegarle, y la media o el salto usarían la fecha anterior."""
+        v = e.args[0] if isinstance(e.args, list) and e.args else e.args
+        if isinstance(v, str) and v != w.value:
+            w.set_value(v)
+    def set_window(typed_in: bool = False):
+        """Activa o actualiza el promedio entre las dos fechas (índices de las salidas incluidas). typed_in (Intro o
+        salir de t1/t2): no recalcula si la ventana no cambia, porque Intro y luego salir del campo lo harían dos veces."""
         from ..analysis.derived import time_window
         if not avg_sw.value:
             st.window = None; avg_n.set_text("")
@@ -1276,6 +1284,8 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
                 w = time_window(ds.time.values, avg_a.value, avg_b.value)
             except (ValueError, TypeError):
                 ui.notify(t["goto_time_bad"], type="warning"); return
+            if typed_in and st.window is not None and np.array_equal(w, st.window):
+                return
             if w.size == 0:
                 ui.notify(t["avg_empty"], type="warning"); st.window = None; avg_n.set_text(t["avg_empty"])
             else:
@@ -1298,9 +1308,11 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
     ek_k.bind_visibility_from(ek_ref, "value", backward=lambda v: v == "level")
     avg_sw.on_value_change(lambda e: set_window())
     for w_ in (avg_a, avg_b):
-        w_.on("keydown.enter", lambda e: set_window()); w_.on("blur", lambda e: set_window())
+        for ev in ("keydown.enter", "blur"):
+            w_.on(ev, lambda e, w=w_: (typed(w, e), set_window(typed_in=True)), js_handler="(e) => emit(e.target.value)")
     tsl.on_value_change(on_time)
-    tlabel.on("keydown.enter", lambda e: goto_time()); tlabel.on("blur", lambda e: goto_time())
+    for ev in ("keydown.enter", "blur"):
+        tlabel.on(ev, lambda e: (typed(tlabel, e), goto_time()), js_handler="(e) => emit(e.target.value)")
     ui.timer(0.08, render_time)
     comp_sel.on_value_change(lambda e: (setattr(st, "component", e.value), update_series_fig()))
     sec_follow = {"on": True, "prog": False}

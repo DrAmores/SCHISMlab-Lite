@@ -3,6 +3,19 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.7.5 (2026-10-27) — La fecha de t1/t2 siempre se aplica
+
+- Promediar entre t1 y t2: la media usa siempre la fecha escrita en el campo. A veces la última tecla no llegaba al
+  programa, sobre todo con el panel Perfil y hodógrafa abierto, y la media seguía con la ventana anterior aunque el
+  campo mostrara la nueva. Lo mismo en el campo Instante. Además, Intro y luego salir del campo ya no recalculan la
+  media dos veces.
+- Escala fija de `elevation`: ya no baja hasta 0 por el reposo inicial y la rampa. En un caso con nivel medio de 0.46 m
+  va de 0.36 a 0.56 m, como el mapa del instante.
+- Barras de color: la marca central es 0 también en el mapa de diferencias de Comparar y en los Hovmöller (antes
+  «−4.44e-17»).
+- Vista previa de las condiciones iniciales (Física): el eje dice «distancia desde el extremo oeste (O) (km)», como en
+  Secciones, y empieza en 0.
+
 ## 0.7.4 (2026-10-27) — Arreglos pedidos al repetir las prácticas
 
 Lecturas que daban números distintos:
