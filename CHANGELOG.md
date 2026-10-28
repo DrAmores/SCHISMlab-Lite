@@ -3,6 +3,11 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.7.6 (2026-10-28) — Acordeones más claros
+
+- Los acordeones (Física, Forzamientos, Resultados…) tienen borde y cabecera con fondo propio. El abierto se marca con
+  el borde y una franja de color. En modo oscuro, igual con colores oscuros.
+
 ## 0.7.5 (2026-10-27) — La fecha de t1/t2 siempre se aplica
 
 - Promediar entre t1 y t2: la media usa siempre la fecha escrita en el campo. A veces la última tecla no llegaba al
