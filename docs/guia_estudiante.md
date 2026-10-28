@@ -7,8 +7,8 @@ interfaz escribe por ti; puedes abrirlo con un editor cuando quieras ver qué ha
 
 La interfaz tiene **siete pasos** en la barra lateral (Dominio y malla · Física · Forzamientos y contornos ·
 Salidas · Parámetros avanzados · Ejecutar · Resultados), con una marca cuando cada uno está hecho y un botón *Guardar y
-continuar* fijo al pie de cada paso (el botón principal); bajo el paso activo aparece una línea con lo que se hace en él y, al final de la barra, «Siguiente paso». En la cabecera están Inicio, el chip del caso abierto (duplicar, exportar o cambiar de caso), el idioma, el modo oscuro y el menú ⋮ con Instalación, Actualizar, Informar de un problema y Ayuda. En Inicio, la tarjeta **Empezar un caso nuevo**
-crea un caso con tu nombre. Debajo del nombre, **Carpeta de la simulación** decide dónde van la malla, los
+continuar* fijo al pie de cada paso (el botón principal); bajo el paso activo aparece una línea con lo que se hace en él y, al final de la barra, «Siguiente paso». En la cabecera están Inicio, el chip del caso abierto (duplicar, exportar o cambiar de caso), el idioma, el modo oscuro y el menú ⋮ con Instalación, Actualizar, Informar de un problema y Ayuda. En Inicio, la **Galería de casos** muestra tus casos (*Mis casos*) con una miniatura de la malla y el estado de cada
+paso (malla, ficheros, simulación), y la tarjeta **Empezar un caso nuevo** crea un caso con tu nombre. Debajo del nombre, **Carpeta de la simulación** decide dónde van la malla, los
 forzamientos, `param.nml`, los resultados y una copia del YAML (en una subcarpeta con el nombre del caso); por defecto
 `~/.schismlab/cases`, y la última carpeta elegida se recuerda; el botón de carpeta abre un explorador para elegirla sin
 teclear la ruta (con accesos rápidos y «Nueva carpeta»). El YAML del caso queda siempre en *Mis casos*, que es lo
@@ -17,38 +17,41 @@ carpetas de Windows (`/mnt/...`): Dropbox y NTFS fallan a veces con ficheros gra
 La barra lateral muestra siempre un resumen del caso abierto: dominio, duración, compilación y forzamientos.
 
 Cada tarjeta tiene además **Exportar**: crea un `.zip` con la configuración del caso y, si lo marcas, su malla y
-entradas y sus resultados, para pasárselo a otra persona; en la tarjeta *Nuevo caso* está **Importar caso**, que lo
-carga en *Mis casos*. En la cabecera, **Informar de un problema** abre una incidencia en GitHub con el diagnóstico
+entradas y sus resultados, para pasárselo a otra persona; en la tarjeta *Empezar un caso nuevo* está **Importar caso (.zip exportado)**, que lo
+carga en *Mis casos*. En el menú ⋮ de la cabecera, **Informar de un problema** abre una incidencia en GitHub con el diagnóstico
 (versión, sistema, últimas líneas de los registros) ya relleno, y **Actualizar** comprueba si hay una versión nueva
 de SCHISMlab, la instala y reinicia la interfaz (también se comprueba sola una vez al día).
 
+![Inicio](img/ng_home.png){ width=800 }
+
 Cada campo ajustable lleva un icono **(i)** al final: al pasar el ratón explica qué hace el parámetro, qué cambia
-al moverlo, sus unidades y valores típicos. En *Parámetros avanzados* la explicación de cada parámetro de los
-`.nml` aparece debajo de él.
+al moverlo, sus unidades y valores típicos (en la imagen, el paso de tiempo en *Física*). En *Parámetros avanzados*
+la explicación de cada parámetro de los `.nml` aparece debajo de él.
 
 ![Ayuda de un parámetro](img/ng_help.png){ width=800 }
 
 
-![Inicio](img/ng_home.png){ width=800 }
+## 2. Instalación (menú ⋮ de la cabecera)
 
-
-## 2. Instalación (botón de la cabecera)
+![Instalación](img/ng_install.png){ width=800 }
 
 Arriba, la tarjeta **SCHISMlab Pro** sirve para activar la edición completa con un token de acceso, si te lo han dado.
 
 Elige los módulos con los que compilar SCHISM (precipitación/evaporación, oleaje WWM, sedimentos, hielo,
 trazadores, biogeoquímica...). Cada combinación se compila como un ejecutable distinto y queda en la lista
-de compilaciones disponibles; después, en Parámetros, se elige cuál usar para cada caso.
+de *Compilaciones disponibles*; después, en *Física → Compilación y módulos*, se elige cuál usar en cada caso.
 
-Debajo, el estado de SCHISM y el número de núcleos de tu ordenador.
+Debajo, cuántas compilaciones de SCHISM hay y el número de núcleos de tu ordenador.
 
 ## 3. Paso 1 · Dominio y malla
+
+![Malla](img/ng_mesh.png){ width=800 }
 
 La página está ordenada en tarjetas numeradas, con *Guardar* y *Generar malla* siempre a mano en una barra fija abajo:
 
 1. **Generador**: el dominio idealizado, un rectángulo en metros con un fondo analítico.
-2. **Idealizado**: tamaño del dominio (Lx, Ly), tamaño de los elementos (dx), forma del fondo y tipo de cada lado
-   (pared, forzado o radiación).
+2. **Idealizado**: tamaño del dominio (Lx, Ly), tamaño de los elementos (dx), forma del fondo (con sus parámetros
+   y la fórmula que usa) y tipo de cada lado en *Contornos* (pared, forzado o radiación).
 3. **Malla actual**: estadísticas, CFL, tiempo estimado y visor.
 
 Pulsa *Generar malla* y verás el mapa interactivo de profundidades y la calidad.
@@ -110,11 +113,14 @@ suroeste); p. ej. `100 - 80*exp(-((x-150e3)**2 + (y-60e3)**2)/(2*20e3**2))`.
 
 ## 4. Paso 2 · Física
 
+![Física](img/ng_model.png){ width=800 }
+
 La página está organizada en acordeones (Compilación y módulos, Instante, Malla vertical, Modelo, Condiciones
-iniciales y Escenario) cuyo subtítulo resume el estado actual («3D sigma · 11 niveles», «baroclino · k-kl», «1 día ·
-Δt 120 s»): fechas y duración, paso de tiempo, malla vertical (2D, sigma o sigma-z, con una descripción de cada tipo
-y el botón «Ver malla vertical» que dibuja los niveles), baroclino o no, cierre turbulento, filtro de Shapiro y
-condiciones iniciales.
+iniciales y Escenario y rugosidad) cuyo subtítulo resume el estado actual («3D sz · 15 niveles», «baroclino · k-kl»,
+«4,0 días · Δt 150 s · 2020-01-01»): la compilación de SCHISM que usa el caso y sus módulos, fechas y duración (los
+casos nuevos empiezan el 01/01/2020), paso de tiempo (con el Δt recomendado para la malla), malla vertical (2D, sigma
+o sigma-z, con una descripción de cada tipo y el botón «Ver malla vertical» que dibuja los niveles), baroclino o no,
+cierre turbulento, filtro de Shapiro, condiciones iniciales y rugosidad del fondo.
 
 **Filtro de Shapiro (`shapiro0`).** Es un filtro numérico que suaviza la velocidad para quitar el ruido de malla. Con
 valores altos (0.5, el máximo) actúa como una fricción lateral: frena las corrientes junto a las paredes, ensancha las
@@ -141,10 +147,13 @@ expresión resultante (`initial.temperature`, ...) y la receta (`initial.recipe`
 puede escribirse a mano.
 ## 5. Paso 3 · Forzamientos y contornos (acordeones)
 
-Viento (uniforme, por expresión o como esfuerzo en Pa) y mareas y nivel en los contornos (marea idealizada, tsunami,
-serie de nivel), cada uno en un acordeón cuyo subtítulo resume lo elegido («sin viento», «M2 idealizada 0,5 m»).
- Si el caso no tiene contornos
-abiertos, un aviso arriba lo indica. Las variables de salida y las estaciones están en el paso siguiente, *Salidas*.
+Viento (acordeón *Atmósfera*: uniforme, por expresión o como esfuerzo en Pa, con la fórmula de arrastre y la rampa)
+y nivel en los contornos (acordeón *Mareas y nivel*: marea idealizada, tsunami, serie de nivel), cada uno con un
+subtítulo que resume lo elegido («esfuerzo del viento (Pa)», «M2 idealizada 0,5 m»).
+
+![Forzamientos](img/ng_forcing.png){ width=800 }
+
+Si el caso no tiene contornos abiertos, un aviso arriba lo indica. Las variables de salida y las estaciones están en el paso siguiente, *Salidas*.
 
 En *Mareas y nivel* está la **capa esponja**: relaja la velocidad (y opcionalmente el nivel) hacia cero en una franja
 junto a los contornos abiertos para absorber lo que sale y evitar reflexiones (chorros baroclinos, ondas internas, mareas
@@ -164,6 +173,8 @@ boundaries:
 ```
 
 ## 6. Paso 4 · Salidas
+
+![Salidas](img/ng_outputs.png){ width=800 }
 
 Página propia del menú para decidir qué guarda la simulación:
 
@@ -187,15 +198,17 @@ Página propia del menú para decidir qué guarda la simulación:
 Todos los parámetros de `param.nml` (y de `sediment.nml` si lleva
 sedimentos, etc.) con su explicación. Cada uno lleva una marca: **valor por defecto**, **lo fija SCHISMlab** (se
 calcula a partir de las páginas anteriores) o **modificado** (tu valor manda). Puedes buscar por nombre o por
-palabra de la explicación, ver sólo los modificados, restaurar cualquiera y ver el fichero generado. Arriba se elige
-la **compilación** de SCHISM que se va a usar (ver Instalación): la lista de ficheros y parámetros se adapta a sus
-módulos. Lo que cambies se guarda en el YAML del caso (`namelists:`), así la simulación es reproducible.
+palabra de la explicación, ver sólo los modificados (o también los de módulos que la compilación no lleva) y
+restaurar cualquiera. Arriba se ven los **módulos** de la compilación elegida y el botón *Compilación y módulos*, que
+lleva a Física, donde se cambia: la lista de ficheros y parámetros se adapta a esos módulos. Lo que cambies se guarda en el YAML del caso (`namelists:`), así la simulación es reproducible.
 
 ## 8. Paso 6 · Ejecutar
 
 ![Ejecutar](img/ng_run.png){ width=800 }
 
-*Preparar ficheros* escribe todas las entradas de SCHISM; después *Ejecutar* en tu ordenador. La barra de progreso y el registro se actualizan en vivo, y si cambias de página y vuelves se recuperan.
+Arriba, **Comprobaciones**: si la compilación está hecha, si hay malla, y el paso de tiempo con el CFL y el tiempo
+estimado. *Preparar ficheros* escribe todas las entradas de SCHISM; después *Ejecutar en este ordenador* con los
+**procesos** que elijas, y *Ver resultados* al terminar. La barra de progreso y el registro se actualizan en vivo, y si cambias de página y vuelves se recuperan.
 Mientras corre, **Detener** (local) para la simulación y conserva las salidas escritas hasta ese momento. Si una tarea larga tarda sin novedades, el registro añade cada 10 s una línea «sigue trabajando».
 
 ## 9. Paso 7 · Resultados (pestañas: mapas y series, espectro y wavelet, partículas, comparar, informe)
@@ -211,23 +224,26 @@ a partir de una (con su `caso.yaml` y sus entradas copiadas), para reproducirla 
 ### Mapas y series (explorador)
 
 
-Encima del mapa solo están la variable, la **capa** sigma (deslizador con etiqueta), una **profundidad fija**
-(el campo 3D se interpola en cada columna) o la **profundidad de isosuperficie** (con el valor: 15 para la isoterma
-de 15 °C, 37 para la isohalina de 37, 27 para la isopicna σt = 27) y el deslizador de tiempo con ▶. En ese último
-modo el mapa, la serie de cada punto, la sección (línea gruesa sobre el corte, sea cual sea la variable dibujada) y
-el Hovmöller muestran la **profundidad a la que la variable vale ese valor**: es la forma de medir el espesor h(x, t)
-de una capa. La densidad σt aparece como variable derivada (UNESCO, de T y S) si no se guardó waterDensity. El resto (fondo del mapa, escala de
-colores, mínimo y máximo, **flechas**, malla y escala fija entre instantes, velocidad de reproducción) está en el
-acordeón «Estilo del mapa» debajo del mapa. Las flechas son las de la propia variable si es vectorial (`windStress`,
-`depthAverageVel`, `horizontalVel`) y, si no, las de la velocidad; la etiqueta de abajo dice de qué campo y de qué
-nivel son. El nivel 0 del deslizador de capa es el **fondo, donde SCHISM da siempre velocidad nula**; para ver la corriente
-junto al fondo usa el nivel 1. El deslizador de tiempo y el botón ▶ mueven el mapa y la sección activa a la vez; en el
-campo **Instante** se puede escribir una fecha y hora (AAAA-MM-DD HH:MM) y pulsar Intro para ir a la salida más
-próxima. Lo que hace un clic en el mapa lo decide la subpestaña abierta debajo:
+A la izquierda, la tarjeta **Campo de color** reúne lo que se dibuja: la variable, el **nivel** (por capa, con un
+deslizador con etiqueta; a una **profundidad fija**, donde el campo 3D se interpola en cada columna; o la
+**profundidad de isosuperficie**, con el valor: 15 para la isoterma de 15 °C, 37 para la isohalina de 37, 27 para la
+isopicna σt = 27), el interruptor **Promediar entre t1 y t2** y, debajo, el acordeón **Estilo del mapa** (fondo del
+mapa, isolíneas, **flechas**, colores, mínimo y máximo, escala fija entre instantes, malla y velocidad de
+reproducción). A la derecha, el mapa con el botón ▶, el deslizador de tiempo y el campo **Instante**, donde se puede
+escribir una fecha y hora (AAAA-MM-DD HH:MM) y pulsar Intro para ir a la salida más próxima.
+
+En el modo de isosuperficie el mapa, la serie de cada punto, la sección (línea gruesa sobre el corte, sea cual sea la
+variable dibujada) y el Hovmöller muestran la **profundidad a la que la variable vale ese valor**: es la forma de
+medir el espesor h(x, t) de una capa. La densidad σt aparece como variable derivada (UNESCO, de T y S) si no se
+guardó waterDensity. Las flechas son las de la propia variable si es vectorial (`windStress`, `depthAverageVel`,
+`horizontalVel`) y, si no, las de la velocidad; la etiqueta de abajo dice de qué campo y de qué nivel son. El nivel 0
+del deslizador de capa es el **fondo, donde SCHISM da siempre velocidad nula**; para ver la corriente junto al fondo
+usa el nivel 1. El deslizador de tiempo y el botón ▶ mueven el mapa y la sección activa a la vez. Lo que hace un
+clic en el mapa lo decide la subpestaña abierta debajo:
 
 - **Puntos**: cada clic añade un punto (con nombre y color editables; las estaciones del caso ya aparecen con su
   nombre) con su serie temporal superpuesta a las demás, cada una de un color, y su perfil vertical en el instante
-  actual; botón CSV.
+  actual; botón *Series (CSV)*.
 - **Secciones**: dos clics trazan una sección, o dibuja una línea con la herramienta de línea de la barra del mapa.
   Los extremos de las secciones se pueden **arrastrar** y el corte se actualiza. Los botones **Longitudinal** y
   **Transversal** esperan un clic en el mapa y trazan la sección paralela o perpendicular al eje largo del dominio
@@ -241,8 +257,13 @@ próxima. Lo que hace un clic en el mapa lo decide la subpestaña abierta debajo
   parar, el mapa se pone en el instante actual. El número de puntos del corte depende de su longitud
   y de la malla (dos por elemento en el tramo más fino, de 120 a 2000), así que un pulso estrecho no se recorta. La
   variable de la sección sigue a la del mapa hasta que se elige otra a mano.
-- El corte vertical muestra la variable con isolíneas y flechas (componente de la velocidad a lo largo del
-  corte y velocidad vertical w multiplicada por el «factor w»); el botón Hovmöller dibuja distancia–tiempo.
+- Bajo los botones de sección están la **Variable**, la **Componente en la sección** (en las vectoriales), *Solo en
+  el nivel del mapa* (en las 3D) y el botón **Hovmöller** (distancia–tiempo). El corte vertical de una variable 3D
+  muestra la variable con isolíneas y flechas (componente de la velocidad a lo largo del corte y velocidad vertical w
+  multiplicada por el «factor w»); *isolíneas* y *factor w* solo aparecen con el corte vertical.
+
+  ![Sección vertical](img/ng_sections.png){ width=600 }
+
 - **Animación**: mapa o sección animados en el navegador (cada N instantes) y **Exportar MP4** de la vista
   actual (mapa con flechas o sección), que queda en la carpeta del caso.
 
@@ -272,16 +293,23 @@ próxima. Lo que hace un clic en el mapa lo decide la subpestaña abierta debajo
   ∫ v_E dz) en el rango de z elegido (vacío = toda la columna; «desde» vacío es el fondo y «hasta» 0 es la superficie
   libre, aunque η > 0) con su ángulo respecto al viento. La hodógrafa no dibuja el nivel del fondo (velocidad nula). Si
   la viscosidad guardada cambia en el tramo del ajuste (k-kl), las lecturas avisan de que De y Az suponen A_z constante.
+
+  ![Perfil y hodógrafa](img/ng_ekman.png){ width=600 }
 - **Secciones de variables 2D** (`elevation`, `depthAverageVel`, `transport`, `vorticity`...): se dibujan como una
-  curva a lo largo del corte, con eje Y logarítmico opcional (de |y − referencia|), **ajuste lineal** en un tramo
-  (pendiente α y escala 1/α en km) e **integral** entre dos distancias (con `transport` da m³/s y Sv: el transporte de
+  curva a lo largo del corte. Sus herramientas están en el recuadro **Curva a lo largo de la sección**, una por fila y
+  con su tramo al lado: eje Y logarítmico opcional (de |y − referencia|) con **Restar**, **ajuste lineal** entre
+  *desde* y *hasta* (km; pendiente α y escala 1/α en km) e **integral** entre otras dos distancias (con `transport` da m³/s y Sv: el transporte de
   una corriente; la unidad de la integral es la de y por metro: m/s → m²/s). Se indican también los cambios de signo; con
   **Restar** un valor, los cruces de y con ese valor (con una curva de temperatura y Restar = 16, la posición del
   frente). Una curva casi constante se dibuja plana (el eje no amplía diferencias de 1e-6). En una variable 3D, el
   interruptor **Solo en el nivel del mapa** dibuja la sección en la capa (o la profundidad fija) del mapa como una curva
   con las mismas herramientas: por ejemplo, v en superficie a lo largo de una sección. Con el mapa en **profundidad de
   isosuperficie**, la curva es la profundidad h(x) de esa isosuperficie (en m, media de la ventana si se promedia): por
-  ejemplo, el ajuste de ln(H − h) de la isoterma en el ajuste geostrófico.
+  ejemplo, el ajuste de ln(H − h) de la isoterma en el ajuste geostrófico. En la imagen, el transporte hacia el norte
+  Ty a lo largo de una sección oeste–este y su integral hasta el cambio de signo: el transporte de la corriente de
+  contorno oeste.
+
+  ![Curva de una sección con integral](img/ng_sections_curve.png){ width=600 }
 
 ### Diagnósticos en un cuaderno: transporte, vorticidad y función de corriente
 
@@ -318,6 +346,9 @@ exactamente ese τ con la fórmula de arrastre elegida, y `windStress × 1000` l
 
 ### Espectro y wavelet
 
+![Espectro y wavelet](img/ng_spectrum.png){ width=800 }
+
+Arriba se elige el **origen** de las series, la variable, los puntos, la ventana del espectro y ω₀ de la wavelet.
 Para los puntos del mapa (series del netCDF) o para las **estaciones** (fichero `staout`, mucho más densas:
 `output.station_interval_minutes`, 10 min por defecto; guardan η, T, S, u, v y w): serie sin tendencia,
 espectro de Welch con banda de confianza del 95 %, espectro **rotatorio** de u+iv (horario y antihorario:
@@ -334,8 +365,16 @@ días no hay espectro útil; usa estaciones o registros más largos. Con pocos d
 
 ### Partículas, informe y comparación
 
-- **Partículas**: suelta partículas en un disco (pincha en el mapa para fijar el centro) y síguelas con la velocidad
-  guardada; trayectorias, animación y distancia media recorrida (CSV descargable).
+- **Partículas**: suelta partículas en un disco (pincha en el mapa para fijar el centro; número, radio, duración y
+  velocidad media vertical o de una capa) con *Soltar*, y síguelas con la velocidad guardada; trayectorias, animación
+  con ▶ y distancia media y máxima recorrida (CSV descargable).
+
+  ![Partículas](img/ng_particles.png){ width=800 }
+
 - **Informe de la simulación**: HTML autocontenido con configuración, malla, parámetros y figuras, para entregar.
-- **Comparar con otra simulación**: diferencia de la variable actual entre dos casos y series superpuestas.
+- **Comparar con otra simulación**: elige el otro caso en *Caso* (escribe parte del nombre para filtrar la lista) y
+  pulsa *Comparar*: mapa de la diferencia de la variable actual (este caso − el otro, rojo = positivo) y series
+  superpuestas en el punto elegido.
+
+  ![Comparar](img/ng_compare.png){ width=800 }
 

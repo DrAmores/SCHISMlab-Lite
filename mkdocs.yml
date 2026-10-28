@@ -28,12 +28,14 @@ markdown_extensions:
       generic: true
 extra_javascript:
   - javascripts/mathjax/tex-mml-chtml.js
+# guía de estilo para el desarrollo (schismlab/gui/brand): no va en la ayuda
+exclude_docs: |
+  marca.md
 nav:
   - Inicio: index.md
   - Instalación: instalacion.md
   - Guía del estudiante: guia_estudiante.md
   - El fichero del caso (YAML): yaml.md
-  - Identidad visual: marca.md
 
 extra_css:
   - stylesheets/brand.css

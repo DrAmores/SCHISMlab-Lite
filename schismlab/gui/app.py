@@ -342,8 +342,8 @@ body{font-family:'Space Grotesk',Helvetica,Arial,sans-serif;letter-spacing:.005e
 .q-expansion-item .q-expansion-item{border-radius:8px;margin:8px 0} .q-card .q-expansion-item .q-expansion-item__content,.q-expansion-item .q-expansion-item .q-expansion-item__content{padding:6px 4px 10px 8px!important} .q-card .q-expansion-item>.q-expansion-item__container>.q-item{padding-left:10px;padding-right:8px}
 .body--dark .q-expansion-item{background:#1f1f1f;border-color:#3a4447} .body--dark .q-expansion-item__container>.q-item{background:#262b2c}
 .body--dark .q-expansion-item--expanded{border-color:#0e9aa7} .body--dark .q-expansion-item--expanded>.q-expansion-item__container>.q-item{background:#1f3436;border-bottom-color:#2d4a4d}
-.sl-curve-tools{display:grid;grid-template-columns:minmax(13rem,max-content) minmax(8rem,10rem) minmax(8rem,10rem);gap:0 20px;align-items:center;padding:8px 14px 10px;border:1px solid #d9dee2;border-radius:10px}
-.sl-curve-title{grid-column:1/-1} .sl-curve-wide{grid-column:span 2;max-width:20.5rem} .body--dark .sl-curve-tools{border-color:#3a4447}
+.sl-curve-tools{display:grid;grid-template-columns:minmax(10.5rem,max-content) minmax(4.5rem,10rem) minmax(4.5rem,10rem);gap:0 16px;align-items:center;padding:8px 14px 10px;border:1px solid #d9dee2;border-radius:10px}
+.sl-curve-title{grid-column:1/-1} .sl-curve-wide{grid-column:span 2;max-width:20.5rem;min-width:0} .sl-curve-tools>.q-field{min-width:0} .sl-curve-tools .q-toggle__label{white-space:nowrap} .body--dark .sl-curve-tools{border-color:#3a4447}
 @media (max-width:600px){.sl-curve-tools{grid-template-columns:1fr 1fr}.sl-curve-tools>.q-row,.sl-curve-tools>.row{grid-column:1/-1}}
 .body--dark body,.body--dark .q-page{background:#1c1c1c}
 body.body--dark .q-chip.q-chip{border:1px solid #777;background:transparent!important;color:#eee}
@@ -1810,7 +1810,7 @@ def page_model():
         lang_ = S().get("lang", "es")
         with ui.expansion(t["time"], icon="schedule", value=True).classes("sl-exp w-full") as exp_time:
             with ui.row().classes("row wrap q-col-gutter-sm"):
-                start = ui.input(t["start"], value=str(tm.get("start", "2020-03-01"))[:10]).props("type=date").classes("sl-w-md")
+                start = ui.input(t["start"], value=str(tm.get("start", "2020-01-01"))[:10]).props("type=date").classes("sl-w-md")
                 days = ui.number(t["days"], value=float(tm.get("days", 2)), min=0.01, step=0.5).classes("sl-w-sm")
                 dt = ui.number(t["dt"], value=float(tm.get("dt", 60)), min=1, step=10).classes("sl-w-sm")
                 ramp = ui.number(t["ramp"], value=float(tm.get("ramp_days", 0.5)), min=0, step=0.25).classes("sl-w-sm")
@@ -2191,7 +2191,7 @@ def page_forcing():
                             wspr = ui.number(t["waves_spread"], value=float(wb.get("spread", 20.0)), min=2, max=90).props("dense").classes("sl-w-sm")
                         with ui.column().classes("w-full").bind_visibility_from(wbt, "value", backward=lambda v: v == "series"):
                             ui.label(t["wbc_series_hint"]).classes("text-caption text-grey-7")
-                            wtab = ui.textarea(value="\n".join(", ".join(str(x) for x in row) for row in (wb.get("table") or [["2020-03-01 00:00", 2.0, 8.0, 45.0], ["2020-03-02 00:00", 3.0, 9.0, 45.0]]))).props("outlined dense rows=4").classes("w-full")
+                            wtab = ui.textarea(value="\n".join(", ".join(str(x) for x in row) for row in (wb.get("table") or [["2020-01-01 00:00", 2.0, 8.0, 45.0], ["2020-01-02 00:00", 3.0, 9.0, 45.0]]))).props("outlined dense rows=4").classes("w-full")
                         with ui.row().classes("row wrap q-col-gutter-sm items-center").bind_visibility_from(wbt, "value", backward=lambda v: v == "copernicus"):
                             wsrc = ui.select({"med_reanalysis": t["wsrc_med_re"], "med_analysis": t["wsrc_med_an"], "global": t["wsrc_global"]},
                                              value=safe_select(("med_reanalysis", "med_analysis", "global"), wb.get("source", "med_reanalysis"), "med_reanalysis", label=t["wbc_cmems_src"]), label=t["wbc_cmems_src"]).props("dense").classes("sl-w-lg")

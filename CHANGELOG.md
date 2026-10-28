@@ -3,6 +3,16 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.7.10 (2026-10-28) — Guía del estudiante al día
+
+- Guía del estudiante: todas las capturas son de la versión actual. Cada edición tiene las suyas, Lite y Pro. Hay
+  capturas nuevas de Física, Forzamientos, Salidas, Secciones (corte vertical y curva con integral), Perfil y
+  hodógrafa, Espectro, Partículas y Comparar, y el texto describe la interfaz tal como es ahora.
+- La ayuda ya no tiene la página «Identidad visual».
+- Los casos nuevos empiezan el 01/01/2020 (Física → Instante).
+- Secciones: el recuadro «Curva a lo largo de la sección» cabe en paneles estrechos; los campos desde/hasta ya no
+  se salen del borde.
+
 ## 0.7.9 (2026-10-28) — La ayuda funciona entera, también sin internet
 
 - Ayuda: todas las páginas se abren. Antes solo funcionaba la portada: Instalación, la guía, las prácticas y el botón

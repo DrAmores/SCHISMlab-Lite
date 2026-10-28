@@ -173,7 +173,7 @@ def new_case(name: str, folder: Path | None = None, workdir_root: Path | None = 
                 {"generator": "idealized", "Lx": 100000.0, "Ly": 100000.0, "dx": 2500.0, "bathymetry": 200.0, "open_sides": []})
         extra = {} if is_pro() else {"reference": {"lon0": 0.0, "lat0": 40.5}}   # Lite: cuenca en metros, plano f a 40.5° N
         save_cfg(p, _set_workdir({"name": name, "mesh": mesh, **extra,
-                     "vertical": {"type": "2d"}, "time": {"start": "2020-03-01", "days": 2, "dt": 60, "ramp_days": 0.5},
+                     "vertical": {"type": "2d"}, "time": {"start": "2020-01-01", "days": 2, "dt": 60, "ramp_days": 0.5},
                      "physics": {"baroclinic": False}, "initial": {"elevation": 0, "temperature": 20, "salinity": 36},
                      "forcing": {}, "boundaries": {"elevation": "none"},
                      "output": {"interval_minutes": 60, "variables": ["elevation", "depthAverageVel"]}}, name, workdir_root))

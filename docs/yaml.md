@@ -50,7 +50,7 @@ vertical: {type: sz, nsigma: 20, zlevels: [-2500, -1500, -1000, -700, -500, -300
 ## time
 
 ```yaml
-time: {start: 2020-03-01, days: 2, dt: 60, ramp_days: 0.5}     # start admite hora: 2020-03-01T06:30
+time: {start: 2020-01-01, days: 2, dt: 60, ramp_days: 0.5}     # start admite hora: 2020-01-01T06:30
 ```
 
 ## physics
