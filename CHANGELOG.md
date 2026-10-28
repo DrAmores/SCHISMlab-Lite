@@ -3,6 +3,14 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.7.7 (2026-10-28) — Controles de Secciones ordenados
+
+- Secciones: las herramientas de la curva van en un recuadro, «Curva a lo largo de la sección». Cada opción ocupa una
+  fila con su tramo al lado: Eje Y logarítmico con Restar, Ajuste lineal con su desde/hasta (km) e Integral con su
+  desde/hasta (km). Antes los cuatro campos desde/hasta iban seguidos y no se sabía cuál era de cuál.
+- «isolíneas» y «factor w» solo aparecen en el corte vertical, donde se usan. «Solo en el nivel del mapa» va junto a
+  la variable.
+
 ## 0.7.6 (2026-10-28) — Acordeones más claros
 
 - Los acordeones (Física, Forzamientos, Resultados…) tienen borde y cabecera con fondo propio. El abierto se marca con

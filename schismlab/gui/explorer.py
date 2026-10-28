@@ -833,29 +833,39 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
             slist = ui.column().classes("col-12 col-md-4 q-gutter-xs")
             with ui.column().classes("col-12 col-md-8"):
                 ui.label(t["explorer_hint"]).classes("text-caption text-grey-7")
-                with ui.row().classes("row wrap q-col-gutter-sm items-center"):
+                with ui.row().classes("items-center q-gutter-sm q-mt-xs"):
                     armed = {"mode": None}
                     def arm(mode):                                   # el siguiente clic en el mapa traza la sección (sin herramienta de línea)
                         armed["mode"] = mode; st.pending = None; st.click_mode = "armed"; refresh_map(); ui.notify(t["sec_click_wait"], timeout=2500)
                     ui.button(t["sec_transversal"], icon="swap_vert", on_click=lambda: arm("transversal")).props("outline dense color=primary").mark("sec_transversal")
                     ui.button(t["sec_longitudinal"], icon="swap_horiz", on_click=lambda: arm("longitudinal")).props("outline dense color=primary").mark("sec_longitudinal")
+                # qué se dibuja; los interruptores van en su propia fila para que el (i) de la ayuda quede a su lado
+                with ui.row().classes("w-full items-center q-gutter-x-lg q-mt-xs"):
                     sec_vars = list(st.vars)                                      # 3D: corte vertical; 2D y derivadas: perfil a lo largo del corte
                     svar = ui.select({v: var_name(v, lang) for v in sec_vars}, value=st.var if st.var in sec_vars else sec_vars[0], label=t["variable"]).classes("sl-w-md").mark("sec_var")
                     scomp = ui.select({"mag": t["comp_mag"], "u": t["comp_u"], "v": t["comp_v"], "normal": t["comp_normal"], "tangential": t["comp_tangential"]},
                                       value="mag", label=t["component_sec"]).classes("sl-w-md").mark("sec_component")
-                    scont = ui.switch(t["contours"], value=True)
-                    slev = ui.switch(t["sec_atlevel"], value=False).mark("sec_atlevel")
-                    wf = ui.number(t["wfactor"], value=200, min=1, step=50).classes("sl-w-sm")
+                    with ui.row().classes("items-center no-wrap") as slev_box:
+                        slev = ui.switch(t["sec_atlevel"], value=False).mark("sec_atlevel")
+                    with ui.row().classes("items-center no-wrap q-gutter-x-lg") as cut_box:      # solo para el corte vertical
+                        with ui.row().classes("items-center no-wrap"):
+                            scont = ui.switch(t["contours"], value=True)
+                        wf = ui.number(t["wfactor"], value=200, min=1, step=50).classes("sl-w-sm")
                     ui.button(t["hovmoller"], icon="view_timeline", on_click=lambda: show_hov()).props("flat dense")
-                with ui.row().classes("row wrap q-col-gutter-sm items-center") as line_box:   # herramientas del perfil 2D
-                    llog = ui.switch(t["sec_log"], value=False).mark("sec_log")
-                    lref = ui.number(t["sec_ref"], value=0.0, format="%g").props("dense").classes("sl-w-sm").mark("sec_ref")
-                    lfit = ui.switch(t["sec_fit"], value=False).mark("sec_fit")
-                    lf1 = ui.number(t["from_km"], value=0.0, format="%g").props("dense").classes("sl-w-sm").mark("sec_fit_from")
-                    lf2 = ui.number(t["to_km"], value=100.0, format="%g").props("dense").classes("sl-w-sm").mark("sec_fit_to")
-                    lint = ui.switch(t["sec_integral"], value=False).mark("sec_integral")
-                    li1 = ui.number(t["from_km"], value=0.0, format="%g").props("dense").classes("sl-w-sm").mark("sec_int_from")
-                    li2 = ui.number(t["to_km"], value=100.0, format="%g").props("dense").classes("sl-w-sm").mark("sec_int_to")
+                # herramientas de la curva (variable 2D o en el nivel del mapa): cada interruptor con su tramo al lado
+                with ui.element("div").classes("sl-curve-tools w-full q-mt-sm") as line_box:
+                    ui.label(t["sec_curve_tools"]).classes("text-subtitle2 sl-curve-title")
+                    with ui.row().classes("items-center no-wrap"):
+                        llog = ui.switch(t["sec_log"], value=False).mark("sec_log")
+                    lref = ui.number(t["sec_ref"], value=0.0, format="%g").props("dense").classes("sl-curve-wide").mark("sec_ref")
+                    with ui.row().classes("items-center no-wrap"):
+                        lfit = ui.switch(t["sec_fit"], value=False).mark("sec_fit")
+                    lf1 = ui.number(t["from_km"], value=0.0, format="%g").props("dense").mark("sec_fit_from")
+                    lf2 = ui.number(t["to_km"], value=100.0, format="%g").props("dense").mark("sec_fit_to")
+                    with ui.row().classes("items-center no-wrap"):
+                        lint = ui.switch(t["sec_integral"], value=False).mark("sec_integral")
+                    li1 = ui.number(t["from_km"], value=0.0, format="%g").props("dense").mark("sec_int_from")
+                    li2 = ui.number(t["to_km"], value=100.0, format="%g").props("dense").mark("sec_int_to")
                 line_info = ui.label().classes("text-body2 text-weight-medium").style("white-space:pre-line").mark("sec_readout")
                 secfig = ui.plotly(go.Figure()).classes("w-full").style("height:430px").mark("sec_plot")
                 hovfig = ui.plotly(go.Figure()).classes("w-full").style("height:380px"); hovfig.set_visibility(False)
@@ -1039,7 +1049,7 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         try:
             F, z, vel = section_values(st, s, sv, st.its(), comp)
             clabel = label(sv, lang, comp)
-            slev.set_visibility(F.ndim == 2)
+            slev_box.set_visibility(F.ndim == 2)
             iso_curve = False
             if F.ndim == 2 and slev.value:                         # curva en el nivel del mapa (capa, profundidad fija o isosuperficie)
                 if st.iso_ok():                                    # h(x): profundidad de la isosuperficie del mapa (media de la ventana)
@@ -1054,7 +1064,7 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
                     F = F[:, st.layer]; clabel += f" · {st.layer_text(st.layer, t)}"
             when = st.window_text(lang) if st.window is not None else np.datetime_as_string(ds.time.values[st.it], "m").replace("T", " ")
             title = f"{s['name']} · {clabel} · {when}"
-            line_box.set_visibility(F.ndim == 1)
+            line_box.set_visibility(F.ndim == 1); cut_box.set_visibility(F.ndim == 2)
             if F.ndim == 1:                                       # variable 2D o derivada: perfil con ajuste e integral
                 units = "m" if iso_curve else ((VECTOR_UNITS.get(sv) if st.is_vector(sv) else None) or st.F.units(sv))
                 fig, info = section_line_figure(s["sec"], F, clabel, lang, st.dark, log=bool(llog.value), ref=float(lref.value or 0.0),
