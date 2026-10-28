@@ -3,6 +3,15 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.7.9 (2026-10-28) — La ayuda funciona entera, también sin internet
+
+- Ayuda: todas las páginas se abren. Antes solo funcionaba la portada: Instalación, la guía, las prácticas y el botón
+  Guía de las tarjetas de los casos daban error (404).
+- Las fórmulas de la ayuda se ven sin conexión: MathJax va incluido con SCHISMlab y ya no se descarga de internet.
+- Las fórmulas destacadas de los guiones de práctica (Kelvin, Stommel, Munk, ajuste geostrófico…) salen en su propia
+  línea, sin los «$» que se veían antes.
+- Una prueba automática recorre toda la ayuda y avisa si algún enlace se rompe.
+
 ## 0.7.8 (2026-10-28) — Botones de sección con su dirección, zoom que se mantiene y animar solo la sección
 
 - Botones de sección por un clic: llevan el rumbo en el rótulo y una flecha en esa dirección, por ejemplo

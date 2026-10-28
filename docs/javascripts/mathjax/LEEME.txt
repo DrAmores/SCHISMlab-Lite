@@ -1,0 +1,3 @@
+MathJax 3.2.2 (Apache 2.0, ver LICENSE), copiado del paquete npm `mathjax` (carpeta `es5/`): `tex-mml-chtml.js`, las
+fuentes CHTML y las extensiones de TeX que se cargan bajo demanda. Va con la ayuda local para que las fórmulas se vean
+sin conexión.

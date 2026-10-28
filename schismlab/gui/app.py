@@ -3504,8 +3504,8 @@ def page_impacts():
 
 def main(port: int = 8765, show: bool = True, host: str = "127.0.0.1"):
     """Arranca la interfaz. Por seguridad escucha solo en localhost (`host="0.0.0.0"` para exponerla a la red a propósito)."""
-    if (REPO / "site").exists():
-        app.add_static_files("/docs", str(REPO / "site"))
+    from .docs_site import mount_docs
+    mount_docs(app, REPO / "site")                              # ayuda local (pixi run docs), con el index.html de cada carpeta
     ui.run(title=edition_name(), host=host, port=port, show=show, reload=False, storage_secret="schismlab", favicon=str(BRAND_FAVICON), language="es")
 
 
