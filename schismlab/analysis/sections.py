@@ -34,6 +34,47 @@ def principal_axis(ds: xr.Dataset) -> float:
     return float(np.arctan2(ax[1], ax[0]))
 
 
+def elongation(ds: xr.Dataset) -> float:
+    """Cociente entre la dispersión de los nodos a lo largo del eje principal y la perpendicular (1 = sin eje largo)."""
+    xm, ym = metric_xy(ds, ds.x.values, ds.y.values)
+    w = np.linalg.eigvalsh(np.cov(np.vstack([xm - xm.mean(), ym - ym.mean()])))
+    return float(np.sqrt(w[-1] / max(w[0], 1e-30)))
+
+
+def _line_name(th: float, lang: str) -> str:
+    """Rumbo de una recta (sin sentido) del oeste o el sur hacia el otro extremo: «O–E», «S–N», «SO–NE», «NO–SE»."""
+    dx, dy = np.cos(th), np.sin(th)
+    if dx < -1e-9 or (abs(dx) <= 1e-9 and dy < 0):                 # del extremo oeste (o sur) hacia el otro
+        dx, dy = -dx, -dy
+    a, b = compass(-dx, -dy, lang), compass(dx, dy, lang)
+    return f"{a}–{b}"
+
+
+def section_presets(ds: xr.Dataset, lang: str = "es", square: float = 1.2) -> list[dict]:
+    """Botones de sección por un clic según la forma del dominio. Alargado: longitudinal (eje largo) y transversal,
+    con su rumbo; casi cuadrado (cociente de ejes < square), donde el eje largo es arbitrario: oeste–este y sur–norte.
+    Cada uno: kind (para preset_section), prefix (nombre de la sección), label, deg (ángulo de la recta desde el este,
+    para girar el icono) y tip."""
+    es = lang == "es"
+    if elongation(ds) < square:
+        return [dict(kind="x", prefix="OE" if es else "WE", label="Oeste–Este" if es else "West–East", deg=0.0,
+                     tip=("Sección de oeste a este por el punto del clic (el dominio no tiene un eje largo)." if es else
+                          "West–east section through the clicked point (the domain has no long axis).")),
+                dict(kind="y", prefix="SN", label="Sur–Norte" if es else "South–North", deg=90.0,
+                     tip=("Sección de sur a norte por el punto del clic (el dominio no tiene un eje largo)." if es else
+                          "South–north section through the clicked point (the domain has no long axis)."))]
+    th = principal_axis(ds); out = []
+    for kind, ang in (("longitudinal", th), ("transversal", th + np.pi / 2)):
+        nm = _line_name(ang, lang); lon = kind == "longitudinal"
+        lab = ("Longitudinal" if lon else "Transversal") if es else ("Longitudinal" if lon else "Transverse")
+        tip = ((f"A lo largo del eje largo del dominio ({nm}), por el punto del clic." if lon else
+                f"Perpendicular al eje largo del dominio ({nm}), por el punto del clic.") if es else
+               (f"Along the long axis of the domain ({nm}), through the clicked point." if lon else
+                f"Across the long axis of the domain ({nm}), through the clicked point."))
+        out.append(dict(kind=kind, prefix="L" if lon else "T", label=f"{lab} ({nm})", deg=float(np.degrees(ang)) % 180.0, tip=tip))
+    return out
+
+
 def preset_section(ds: xr.Dataset, point, kind: str = "transversal", pad: float = 0.0):
     """Recta por `point` (lon/lat o x/y) a lo largo del eje principal (longitudinal) o perpendicular (transversal),
     recortada al rectángulo del dominio (de borde a borde: llega a la costa o a la pared). Devuelve (p0, p1) en las

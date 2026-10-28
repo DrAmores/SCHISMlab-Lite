@@ -159,3 +159,20 @@ def test_eje_de_la_vista_previa_de_fisica():
     fig = section_figure(frame, np.full(X.size, 100.0), VGrid.sigma(10), {"value": "10 + z / 10"}, "x", "T", "es")
     assert fig.layout.xaxis.title.text == "distancia desde el extremo oeste (O) (km)"
     assert float(np.min(fig.data[0].x)) == 0.0 and float(np.max(fig.data[0].x)) == pytest.approx(100.0)
+
+
+def test_botones_de_seccion_segun_la_forma_del_dominio():
+    """Dominio alargado: Longitudinal/Transversal con su rumbo; casi cuadrado (P7): Oeste–Este y Sur–Norte."""
+    import xarray as xr
+    from schismlab.analysis.sections import section_presets
+
+    def rect(lx, ly):
+        X, Y = np.meshgrid(np.linspace(0, lx, 21), np.linspace(0, ly, 21))
+        return xr.Dataset(coords={"x": ("node", X.ravel()), "y": ("node", Y.ravel())})
+    ns = {p["kind"]: p for p in section_presets(rect(100e3, 800e3))}          # P6: largo de sur a norte
+    assert ns["longitudinal"]["label"] == "Longitudinal (S–N)" and ns["longitudinal"]["deg"] == pytest.approx(90, abs=1)
+    assert ns["transversal"]["label"] == "Transversal (O–E)" and ns["transversal"]["deg"] % 180 == pytest.approx(0, abs=1)
+    sq = [p["kind"] for p in section_presets(rect(2000e3, 2000e3))]           # P7: cuadrado, sin eje largo
+    assert sq == ["x", "y"] and section_presets(rect(2000e3, 2000e3))[0]["label"] == "Oeste–Este"
+    en = {p["kind"]: p for p in section_presets(rect(800e3, 100e3), "en")}
+    assert en["longitudinal"]["label"] == "Longitudinal (W–E)" and en["transversal"]["label"] == "Transverse (S–N)"

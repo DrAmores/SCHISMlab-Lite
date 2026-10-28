@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 from nicegui import run, ui
 from .figures import (LAYOUT, LABELS, label, zero_ticks, color_range, elevation_range, layout, themed, NodeSampler, _aspect, dataset_range, _values, map_arrows, arrow_field, arrow_units, arrows_trace, profile_figure, profile_figure2,
                       section_figure2, section_line_figure, hovmoller_figure, iso_hovmoller_figure, psd_figure, rotary_figure, wavelet_figure, land_polygons, land_traces, boundary_traces)
-from ..analysis.sections import Section, preset_section, field_at_depth, is_geographic
+from ..analysis.sections import Section, preset_section, section_presets, field_at_depth, is_geographic
 from ..analysis.signal import point_series, psd_welch, rotary_spectrum, wavelet_morlet, reference_periods, regularize, resolvable_periods
 
 from ..edition import default_generator
@@ -696,7 +696,7 @@ def animation_figure2(st: ExplorerState, t: dict, lang: str, step: int = 1, prog
                           dict(label="▶", method="animate", args=[None, dict(frame=dict(duration=150, redraw=True), fromcurrent=True)]),
                           dict(label="⏸", method="animate", args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])],
                       sliders=[dict(steps=[dict(method="animate", args=[[f.name], dict(mode="immediate", frame=dict(duration=0, redraw=True))], label=f.layout.title.text[5:16]) for f in frames],
-                                    currentvalue=dict(visible=False), pad=dict(t=30))])
+                                    currentvalue=dict(visible=False), pad=dict(t=30))], uirevision="animacion")
     return fig
 
 
@@ -721,7 +721,7 @@ def section_animation(st: ExplorerState, s: dict, var: str, lang: str, step: int
                           dict(label="▶", method="animate", args=[None, dict(frame=dict(duration=150, redraw=True), fromcurrent=True)]),
                           dict(label="⏸", method="animate", args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])],
                       sliders=[dict(steps=[dict(method="animate", args=[[f.name], dict(mode="immediate", frame=dict(duration=0, redraw=True))], label=f.layout.title.text[5:16]) for f in frames],
-                                    currentvalue=dict(visible=False), pad=dict(t=30))])
+                                    currentvalue=dict(visible=False), pad=dict(t=30))], uirevision="animacion")
     return fig
 
 
@@ -783,6 +783,9 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
                 tsl = ui.slider(min=0, max=ds.time.size - 1, value=st.it).classes("col").mark("time_slider")
                 tlabel = ui.input(t["goto_time"]).props("dense outlined").classes("sl-w-md").style("min-width:11.5rem").mark("time_input") \
                     .tooltip(t["goto_time_tip"])
+                anim_what = ui.select({"both": t["anim_both"], "map": t["anim_only_map"], "section": t["anim_only_section"]}, value="both",
+                                      label=t["anim_what"]).props("dense").classes("sl-w-md").mark("anim_what")
+                anim_what.set_visibility(False)                       # solo con la pestaña Secciones (sin sección no hay elección)
             _ratio = float(np.ptp(ds.y.values) * _aspect(ds.y.values) / max(np.ptp(ds.x.values), 1e-12))
             _h = int(min(720, max(440, 220 + 620 * _ratio)))                 # alto según la forma del dominio
             plot = ui.plotly(themed(map_figure(st, t, lang), st.dark)).classes("w-full").style(f"height:{_h}px").mark("map_plot")
@@ -837,8 +840,12 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
                     armed = {"mode": None}
                     def arm(mode):                                   # el siguiente clic en el mapa traza la sección (sin herramienta de línea)
                         armed["mode"] = mode; st.pending = None; st.click_mode = "armed"; refresh_map(); ui.notify(t["sec_click_wait"], timeout=2500)
-                    ui.button(t["sec_transversal"], icon="swap_vert", on_click=lambda: arm("transversal")).props("outline dense color=primary").mark("sec_transversal")
-                    ui.button(t["sec_longitudinal"], icon="swap_horiz", on_click=lambda: arm("longitudinal")).props("outline dense color=primary").mark("sec_longitudinal")
+                    presets = {pr["kind"]: pr for pr in section_presets(ds, lang)}
+                    for pr in presets.values():                     # icono girado en la dirección que se trazará
+                        with ui.button(on_click=(lambda k: lambda: arm(k))(pr["kind"])).props("outline dense color=primary no-caps").mark(f"sec_{pr['kind']}") as b_:
+                            ui.icon("height").style(f"transform:rotate({90.0 - pr['deg']:.0f}deg)").classes("q-mr-xs")
+                            ui.label(pr["label"])
+                            b_.tooltip(pr["tip"])
                 # qué se dibuja; los interruptores van en su propia fila para que el (i) de la ayuda quede a su lado
                 with ui.row().classes("w-full items-center q-gutter-x-lg q-mt-xs"):
                     sec_vars = list(st.vars)                                      # 3D: corte vertical; 2D y derivadas: perfil a lo largo del corte
@@ -1038,6 +1045,26 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
     def remove_section(i):
         st.sections.pop(i); state_sec["active"] = None if not st.sections else min(i, len(st.sections) - 1)
         refresh_map(); show_section(state_sec["active"]); refresh_sections_list()
+    sec_zoom = {"key": None, "x": None, "y": None}                  # zoom del usuario en la sección (se mantiene al avanzar el tiempo)
+    def on_sec_relayout(e):
+        a = e.args or {}
+        for ax in ("x", "y"):
+            k = f"{ax}axis"
+            if a.get(f"{k}.autorange") or a.get("autosize"):
+                sec_zoom[ax] = None
+            r = a.get(f"{k}.range") or ([a[f"{k}.range[0]"], a[f"{k}.range[1]"]] if f"{k}.range[0]" in a and f"{k}.range[1]" in a else None)
+            if r is not None:
+                sec_zoom[ax] = list(r)
+    def keep_zoom(fig, key: str):
+        """Reaplica el zoom del usuario si es la misma sección, variable y tipo de figura; si no, lo olvida."""
+        if key != sec_zoom["key"]:
+            sec_zoom.update(key=key, x=None, y=None)
+        if sec_zoom["x"] is not None:
+            fig.update_xaxes(range=sec_zoom["x"], autorange=False)
+        if sec_zoom["y"] is not None:
+            fig.update_yaxes(range=sec_zoom["y"], autorange=False)
+        fig.update_layout(uirevision=key)
+        return fig
     def show_section(i, switch: bool = True):
         """Dibuja la sección i; `switch` lleva a la pestaña Secciones (solo cuando lo pide el usuario, no al reproducir)."""
         if i is None or i >= len(st.sections):
@@ -1071,7 +1098,8 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
                                                 fit=(float(lf1.value or 0), float(lf2.value or 0)) if lfit.value else None,
                                                 integ=(float(li1.value or 0), float(li2.value or 0)) if lint.value else None,
                                                 units=units, title=title)
-                line_info.set_text(line_readout(info, units, lang)); secfig.update_figure(fig)
+                line_info.set_text(line_readout(info, units, lang))
+                secfig.update_figure(keep_zoom(fig, f"{s['name']}|{sv}|{comp}|curva|{clabel}|{bool(llog.value)}"))
             else:
                 line_info.set_text("")
                 zr = None
@@ -1083,8 +1111,9 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
                     zr = st.zr if (sv == st.var and st.zr and st.depth_mode == "layer" and comp == st.mcomp and st.window is None) else zr
                 iso = (st.var, st.iso_value) if st.iso_ok() else None
                 cs = "RdBu_r" if (comp != "mag" or sv in ("vorticity", "vorticity_f")) else None
-                secfig.update_figure(section_figure2(s["sec"], sv, st.it, arrows=arr.value, contours=scont.value, wfactor=float(wf.value or 200), zrange=zr,
-                                                     lang=lang, dark=st.dark, iso=iso, F=F, z=z, vel=vel, clabel=clabel, cs=cs, title=title))
+                secfig.update_figure(keep_zoom(section_figure2(s["sec"], sv, st.it, arrows=arr.value, contours=scont.value, wfactor=float(wf.value or 200), zrange=zr,
+                                                               lang=lang, dark=st.dark, iso=iso, F=F, z=z, vel=vel, clabel=clabel, cs=cs, title=title),
+                                               f"{s['name']}|{sv}|{comp}|corte"))
         except Exception as ex:   # noqa: BLE001
             ui.notify(f"{t['sections']}: {ex}", type="warning")
         if switch:
@@ -1127,12 +1156,16 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         if pend["it"] is None:
             return
         st.it = pend["it"]; pend["it"] = None
-        refresh_time_label(); refresh_map_time(); move_cursor()
-        if not in_sections():
-            refresh_profile()                                      # el perfil vertical sigue al tiempo
-            if st.window is None:
-                refresh_ekman()
-        if state_sec["active"] is not None and in_sections():     # la sección sigue al tiempo solo si se está viendo
+        sec_on = state_sec["active"] is not None and in_sections()  # la sección sigue al tiempo solo si se está viendo
+        what = anim_what.value if (sec_on and timer.active) else "both"   # en reproducción se puede animar solo una de las dos
+        refresh_time_label(); move_cursor()
+        if what != "section":
+            refresh_map_time()
+            if not in_sections():
+                refresh_profile()                                  # el perfil vertical sigue al tiempo
+                if st.window is None:
+                    refresh_ekman()
+        if sec_on and what != "map":
             show_section(state_sec["active"], switch=False)
     def refresh_range():
         try:
@@ -1178,7 +1211,7 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
                 st.add_section(st.pending, (x, y)); st.pending = None; refresh_map(); show_section(len(st.sections) - 1); refresh_sections_list()
         else:
             p0, p1 = preset_section(ds, (x, y), m)
-            st.add_section(p0, p1, f"{'T' if m == 'transversal' else 'L'}{len(st.sections) + 1}"); refresh_map(); show_section(len(st.sections) - 1); refresh_sections_list()
+            st.add_section(p0, p1, f"{presets[m]['prefix'] if m in presets else 'S'}{len(st.sections) + 1}"); refresh_map(); show_section(len(st.sections) - 1); refresh_sections_list()
     def on_relayout(e):
         a = e.args or {}
         if "shapes" in a:                                            # línea nueva dibujada (drawline) o lista completa
@@ -1252,6 +1285,8 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         aprog.set_visibility(False); ui.notify(str(out), type="positive"); ui.download(out)
     # reproducción
     def tick():
+        if pend["it"] is not None:                                  # el instante anterior aún no se ha dibujado: no se acumulan
+            return
         nxt = st.it + 1
         if nxt >= ds.time.size:
             nxt = 0
@@ -1260,6 +1295,8 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
     def toggle_play():
         timer.interval = 1 / float(speed.value); timer.active = not timer.active
         play.props(f"icon={'pause' if timer.active else 'play_arrow'}")
+        if not timer.active and anim_what.value != "both":         # al parar, lo que no se animaba se pone en el instante actual
+            pend["it"] = st.it; render_time()
     play.on_click(toggle_play)
     speed.on_value_change(lambda e: setattr(timer, "interval", 1 / float(e.value)))
     var.on_value_change(on_var); lsl.on_value_change(on_layer); dmode.on_value_change(on_dmode); ldep.on_value_change(lambda e: (setattr(st, "depth_m", float(e.value or 0)), refresh_map())); ival.on_value_change(on_iso)
@@ -1310,6 +1347,7 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         return str(panels.value) in ("tab_sections", str(tsec))
     def on_subtab(e):
         st.click_mode = "section" if in_sections() else "point"; st.pending = None; armed["mode"] = None; refresh_map()
+        anim_what.set_visibility(in_sections())
     panels.on_value_change(on_subtab)
     mcomp.on_value_change(on_mcomp); mcomp.set_visibility(st.is_vector(st.var))
     for w_ in (ek_ref, ek_k, ek_f1, ek_f2, ek_i1, ek_i2, ek_th, ek_v0, ek_de):
@@ -1343,6 +1381,7 @@ def explorer_tab(ds, c: dict, wd: Path, t: dict, lang: str, vg, dark: bool = Fal
         w_.on_value_change(lambda e: show_section(state_sec["active"], switch=False) if state_sec["active"] is not None else None)
     scomp.set_visibility(st.is_vector(svar.value)); line_box.set_visibility(False)
     plot.on("plotly_click", on_click, js_handler=CLICK_JS); plot.on("plotly_relayout", on_relayout)
+    secfig.on("plotly_relayout", on_sec_relayout)
     lsl_box.set_visibility(st.nvrt > 1); ldep.set_visibility(False); ival.set_visibility(False); dmode.set_visibility(st.nvrt > 1)
     refresh_time_label(); refresh_points_list(); refresh_sections_list(); refresh_series()
     return st

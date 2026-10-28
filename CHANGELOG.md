@@ -3,6 +3,18 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.7.8 (2026-10-28) — Botones de sección con su dirección, zoom que se mantiene y animar solo la sección
+
+- Botones de sección por un clic: llevan el rumbo en el rótulo y una flecha en esa dirección, por ejemplo
+  «Longitudinal (S–N)» y «Transversal (O–E)». Antes la flecha era siempre la misma y parecían cambiados. En dominios
+  casi cuadrados (ejes con menos de un 20 % de diferencia) no hay eje largo, y los botones son «Oeste–Este» y
+  «Sur–Norte».
+- Secciones: el zoom se mantiene al mover el tiempo o al reproducir con ▶. Antes cada paso volvía a la vista completa.
+  Con doble clic se vuelve a la vista completa.
+- Con la pestaña Secciones abierta, junto a ▶ aparece «Animar»: mapa y sección, solo el mapa o solo la sección. Animar
+  solo la sección es más rápido. Al parar, el mapa se pone en el instante actual. La reproducción ya no acumula pasos
+  si el dibujo va más lento que la velocidad elegida.
+
 ## 0.7.7 (2026-10-28) — Controles de Secciones ordenados
 
 - Secciones: las herramientas de la curva van en un recuadro, «Curva a lo largo de la sección». Cada opción ocupa una

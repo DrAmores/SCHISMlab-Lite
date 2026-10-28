@@ -229,11 +229,16 @@ próxima. Lo que hace un clic en el mapa lo decide la subpestaña abierta debajo
   nombre) con su serie temporal superpuesta a las demás, cada una de un color, y su perfil vertical en el instante
   actual; botón CSV.
 - **Secciones**: dos clics trazan una sección, o dibuja una línea con la herramienta de línea de la barra del mapa.
-  Los extremos de las secciones se pueden **arrastrar** y el corte se actualiza. Los botones **Transversal** y
-  **Longitudinal** esperan un clic en el mapa y trazan la sección perpendicular o paralela al eje principal del
-  dominio por ese punto, de borde a borde (llega a la costa o a la pared) y orientada siempre de oeste a este o de
+  Los extremos de las secciones se pueden **arrastrar** y el corte se actualiza. Los botones **Longitudinal** y
+  **Transversal** esperan un clic en el mapa y trazan la sección paralela o perpendicular al eje largo del dominio
+  por ese punto. Su rótulo dice el rumbo, por ejemplo «Longitudinal (S–N)», y su flecha apunta en esa dirección. Si el
+  dominio es casi cuadrado (ejes con menos de un 20 % de diferencia), no hay eje largo y los botones son **Oeste–Este**
+  y **Sur–Norte**. La sección va de borde a borde (llega a la costa o a la pared) y está orientada siempre de oeste a este o de
   sur a norte: la distancia 0 es el extremo oeste o sur. Los extremos se rotulan con su rumbo (O, E, S, N...) y el eje
-  dice desde cuál se mide («distancia desde el extremo oeste (O)»). El número de puntos del corte depende de su longitud
+  dice desde cuál se mide («distancia desde el extremo oeste (O)»). El zoom que se haga en la sección se mantiene al
+  mover el tiempo o reproducir (doble clic para volver a la vista completa). Con la pestaña Secciones abierta, junto a ▶
+  aparece **Animar**: *mapa y sección*, *solo el mapa* o *solo la sección*. Animar solo la sección es más rápido; al
+  parar, el mapa se pone en el instante actual. El número de puntos del corte depende de su longitud
   y de la malla (dos por elemento en el tramo más fino, de 120 a 2000), así que un pulso estrecho no se recorta. La
   variable de la sección sigue a la del mapa hasta que se elige otra a mano.
 - El corte vertical muestra la variable con isolíneas y flechas (componente de la velocidad a lo largo del
