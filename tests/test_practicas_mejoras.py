@@ -176,3 +176,16 @@ def test_botones_de_seccion_segun_la_forma_del_dominio():
     assert sq == ["x", "y"] and section_presets(rect(2000e3, 2000e3))[0]["label"] == "Oeste–Este"
     en = {p["kind"]: p for p in section_presets(rect(800e3, 100e3), "en")}
     assert en["longitudinal"]["label"] == "Longitudinal (W–E)" and en["transversal"]["label"] == "Transverse (S–N)"
+
+
+def test_sflux_con_hora_de_inicio(tmp_path):
+    """SCHISM solo lee el día de base_date: con inicio a las 17:15 los tiempos van desde las 00:00 (antes, desde las
+    17:15 con base_date a las 17 h, y SCHISM buscaba el forzamiento a medianoche y se paraba)."""
+    import xarray as xr
+    from schismlab.forcing.sflux import write_sflux
+    start = np.datetime64("2006-06-15T17:15")
+    times = start + np.arange(0, 6 * 60, 60).astype("timedelta64[m]")
+    f = write_sflux(tmp_path, np.array([3.0, 4.0]), np.array([39.0, 40.0]), times, {"uwind": np.zeros((6, 2, 2)), "vwind": np.zeros((6, 2, 2))}, start)[0]
+    ds = xr.open_dataset(f, decode_times=False)
+    assert list(ds.time.attrs["base_date"]) == [2006, 6, 15, 0]
+    assert float(ds.time[0]) == pytest.approx(17.25 / 24, abs=1e-6)

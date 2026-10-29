@@ -133,6 +133,21 @@ async def test_params_single_file_has_no_tabs(user: User):
     assert _n_elements(user, ui.tabs) == 0
 
 
+async def test_params_search_opens_matching_sections(user: User):
+    """Buscar un parámetro abre la sección que lo tiene y dice cuántos coinciden (thetai está en &OPT, que empieza cerrada)."""
+    import asyncio
+    from nicegui import ui
+    await user.open("/params?case=cases/tests/prueba_2d.yaml")
+    await user.should_see("rnday")
+    search = next(e for e in user.find(ui.input).elements if e._props.get("label") == "Buscar parámetro")
+    search.set_value("thetai"); await asyncio.sleep(0.2)
+    exps = {e._props["label"].split()[0]: e for e in user.find(ui.expansion).elements if str(e._props.get("label", "")).startswith("&")}
+    assert exps["&OPT"].value and "de" in exps["&OPT"]._props["label"] and not exps["&CORE"].value
+    assert exps["&CORE"]._props["label"].startswith("&CORE  (0 de")
+    search.set_value(""); await asyncio.sleep(0.2)
+    assert " de " not in exps["&OPT"]._props["label"]
+
+
 async def test_outputs_page_station_table(user: User):
     from nicegui import ui
     await user.open("/outputs?case=cases/tests/prueba_2d.yaml")
@@ -434,3 +449,58 @@ async def test_particles_depth_background_drag_and_reload(user: User, tmp_path, 
     assert not any(n == "restyle" and a[1] == [0] for n, a in calls)          # con batimetría de fondo no se reenvía el campo
     await user.open(f"/results?case={p}&tab=particles")                    # recargar la página
     await user.should_see("distancia media recorrida")
+
+
+@requires_pro
+async def test_mesh_page_keeps_flood_zone_from_yaml(user: User, tmp_path):
+    """Una zona inundable escrita en el YAML como rectángulo se conserva al guardar (antes pasaba a «toda la malla» y
+    la tierra baja de todo el dominio, a 3 m, agotó la memoria en Ciutadella)."""
+    import yaml
+    from nicegui import ui
+    from nicegui.testing.user_interaction import UserInteraction
+    zona = {"lon": [3.823, 3.839], "lat": [39.995, 40.007]}
+    cfg = {"name": "inu", "mesh": {"generator": "ocsmesh", "polygon": [[3.0, 39.45], [4.45, 39.45], [4.45, 40.25], [3.0, 40.25]],
+                                   "bathymetry": [{"source": "gebco2021"}], "resolution": {"min": 250, "max": 2500, "regions": []},
+                                   "inundation": {"region": zona, "max_elevation": 4.0, "dem": "mdt02", "size": 3.0}}}
+    p = tmp_path / "inu.yaml"; p.write_text(yaml.safe_dump(cfg))
+    await user.open(f"/mesh?case={p}")
+    await user.should_see("zona del YAML")
+    btn = [b for b in user.find(ui.button).elements if getattr(b, "text", "") == "Guardar"]
+    UserInteraction(user, {btn[0]}, None).click()
+    await user.should_see("Guardado")
+    assert yaml.safe_load(p.read_text())["mesh"]["inundation"]["region"] == zona
+
+
+@requires_pro
+async def test_mesh_page_keeps_layer_zone_from_yaml(user: User, tmp_path):
+    """Una capa de batimetría con zona lon/lat del YAML se muestra como «zona del YAML» y se conserva al guardar."""
+    import yaml
+    from nicegui import ui
+    from nicegui.testing.user_interaction import UserInteraction
+    zona = {"lon": [3.78, 4.0], "lat": [39.93, 40.07]}
+    cfg = {"name": "capa", "mesh": {"generator": "ocsmesh", "polygon": [[3.0, 39.45], [4.45, 39.45], [4.45, 40.25], [3.0, 40.25]],
+                                    "bathymetry": [{"source": "gebco2021"}, {"source": "emodnet2024", "region": zona, "blend_km": 1}],
+                                    "resolution": {"min": 250, "max": 2500, "regions": []}}}
+    p = tmp_path / "capa.yaml"; p.write_text(yaml.safe_dump(cfg))
+    await user.open(f"/mesh?case={p}")
+    sel = [e for e in user.find(ui.select).elements if e._props.get("label") == "Zonas de alta resolución" and e.value == "__yaml__"]
+    assert sel, "la capa debería mostrar «zona del YAML»"
+    btn = [b for b in user.find(ui.button).elements if getattr(b, "text", "") == "Guardar"]
+    UserInteraction(user, {btn[0]}, None).click()
+    await user.should_see("Guardado")
+    assert yaml.safe_load(p.read_text())["mesh"]["bathymetry"][1]["region"] == zona
+
+
+async def test_case_card_refreshes_when_files_appear(user: User, tmp_path):
+    """La tarjeta del caso marca «malla» sola cuando aparece hgrid.gr3 (antes había que recargar la página)."""
+    import asyncio, shutil, yaml
+    from nicegui import ui
+    cfg = yaml.safe_load(open("cases/tests/prueba_2d.yaml"))
+    p = tmp_path / "tarjeta.yaml"; p.write_text(yaml.safe_dump(cfg))
+    await user.open(f"/model?case={p}")
+    await user.should_see("Física")
+    n_ok = lambda: sum(1 for e in user.find(ui.icon).elements if e._props.get("name") == "check_circle" and "16px" in str(e._props.get("size", "")))
+    before = n_ok()
+    wd = tmp_path / cfg["name"]; wd.mkdir(exist_ok=True); (wd / "hgrid.gr3").write_text("x")
+    await asyncio.sleep(4.6)
+    assert n_ok() == before + 1

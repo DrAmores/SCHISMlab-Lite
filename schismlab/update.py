@@ -104,7 +104,7 @@ def changelog_since(version_remote: str | None, local_version: str | None = None
     out, keep = [], False
     for line in txt.splitlines():
         if line.startswith("## "):
-            keep = __version__ not in line
+            keep = line[3:].split()[0] != __version__        # versión exacta: 0.7.1 no es 0.7.10
             if not keep:
                 break
         if keep:

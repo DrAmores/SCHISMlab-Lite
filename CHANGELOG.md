@@ -3,6 +3,16 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.8.0 (2026-10-29) — Hora de inicio con minutos y búsqueda de parámetros
+
+- Hora de inicio con minutos: campo «Hora de inicio (UTC)» en Física. Antes, un inicio que no fuera a las 00:00 con
+  forzamiento atmosférico paraba SCHISM, y las series salían desplazadas.
+- Retoque de batimetría nuevo, «Rellenar desde el entorno»: la profundidad de la zona se interpola desde su borde.
+- Parámetros avanzados: buscar abre las secciones que contienen el parámetro y dice cuántas coincidencias hay.
+- La tarjeta del caso se actualiza sola al terminar la malla, los ficheros o la simulación. Ejecutar ya no marca en
+  rojo un CFL que SCHISM, semiimplícito, no necesita.
+- Si se cerraba el navegador durante un trabajo largo, su vigilante fallaba.
+
 ## 0.7.10 (2026-10-28) — Guía del estudiante al día
 
 - Guía del estudiante: todas las capturas son de la versión actual. Cada edición tiene las suyas, Lite y Pro. Hay

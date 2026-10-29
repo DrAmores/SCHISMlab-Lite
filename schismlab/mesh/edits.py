@@ -4,14 +4,16 @@ Configuración en el YAML (mesh.bathymetry_edits), aplicados en orden:
     bathymetry_edits:
       - name: canal          # opcional
         polygon: [[lon, lat], ...]
-        op: set              # set | min_depth | max_depth | offset | smooth
+        op: set              # set | min_depth | max_depth | offset | smooth | fill
         value: 8             # m (profundidad positiva hacia abajo; negativo = cota sobre el mar)
-        iterations: 5        # solo smooth: pasadas del suavizado laplaciano
+        iterations: 5        # smooth: pasadas del suavizado laplaciano; fill: pasadas máximas (por defecto 2000)
 - set: profundidad fija (dragado de un canal, relleno de un puerto, cota de un dique con valor negativo).
 - min_depth: al menos esa profundidad (abre un paso estrecho que el DEM cierra).
 - max_depth: como mucho esa profundidad (elimina un pozo espurio del DEM).
 - offset: suma (m) a la profundidad actual (dragado uniforme; negativo = recrecimiento).
 - smooth: media con los nodos vecinos, `iterations` veces (suaviza un talud o un escalón entre fuentes).
+- fill: rellena desde el entorno: la profundidad dentro pasa a ser la interpolación (laplaciana) de la de los nodos del
+  borde, fuera del polígono. Para una zona sin batimetría (un dique o un relleno quitado con coastline_edits).
 
 Los retoques se aplican al construir la malla y también a una malla ya hecha: la profundidad sin retoques se guarda en
 depth_unedited.npz (junto con la subida del nivel del mar aplicada en ese momento), de modo que cambiar o quitar un
@@ -25,7 +27,7 @@ import numpy as np
 
 log = logging.getLogger(__name__)
 
-OPS = ("set", "min_depth", "max_depth", "offset", "smooth")
+OPS = ("set", "min_depth", "max_depth", "offset", "smooth", "fill")
 
 
 def edits_cfg(mesh_cfg: dict) -> list[dict]:
@@ -37,7 +39,7 @@ def edits_cfg(mesh_cfg: dict) -> list[dict]:
         if not e.get("polygon") or len(e["polygon"]) < 3:
             raise ValueError("bathymetry_edits: cada retoque necesita un polígono de al menos 3 vértices")
         out.append(dict(name=e.get("name", ""), polygon=[list(map(float, p)) for p in e["polygon"]], op=op,
-                        value=float(e.get("value", 0.0)), iterations=int(e.get("iterations", 5))))
+                        value=float(e.get("value", 0.0)), iterations=int(e.get("iterations", 2000 if op == "fill" else 5))))
     return out
 
 
@@ -85,6 +87,21 @@ def apply_edits(mesh, edits: list[dict]):
             for _ in range(max(1, e["iterations"])):
                 avg = adj @ d / deg
                 d[sel] = avg[sel]
+        elif e["op"] == "fill":
+            if adj is None:
+                adj = _neighbours(mesh.elements, mesh.nnodes)
+            deg = np.asarray(adj.sum(1)).ravel()
+            ring = (adj @ sel.astype(float) > 0) & ~sel                # nodos de fuera que tocan la zona
+            if not ring.any():
+                log.warning("retoque %s: la zona no toca ningún nodo de fuera; no se rellena", e["name"] or e["op"]); continue
+            d[sel] = float(np.mean(d[ring]))
+            for it in range(max(1, e["iterations"])):                  # Laplace con el borde fijo (Jacobi)
+                new = (adj @ d / deg)[sel]
+                ch = float(np.max(np.abs(new - d[sel])))
+                d[sel] = new
+                if ch < 1e-3:
+                    break
+            log.info("retoque %s (fill): %d pasadas, profundidad %.1f-%.1f m", e["name"] or "fill", it + 1, float(d[sel].min()), float(d[sel].max()))
         mesh.depth = d
         log.info("retoque %s (%s %g): %d nodos", e["name"] or e["op"], e["op"], e["value"], int(sel.sum()))
     return mesh

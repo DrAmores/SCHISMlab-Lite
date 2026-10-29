@@ -45,6 +45,15 @@ Debajo, cuántas compilaciones de SCHISM hay y el número de núcleos de tu orde
 
 ## 3. Paso 1 · Dominio y malla
 
+- **Editar polígonos**: cada polígono tiene su color (dominio en rojo, zona inundable en azul discontinuo, el resto de zonas con colores distintos, con leyenda bajo el mapa y el nombre al pasar el ratón), y sus vértices se pintan del mismo color al editar. Con el botón *Editar polígonos* puedes mover vértices (arrastrando), quitarlos (clic) o
+  añadirlos (arrastrando los puntos intermedios) del dominio y de las zonas; *Terminar edición* los guarda.
+
+Pulsa *Generar malla* y verás el mapa interactivo de profundidades y la calidad.
+
+Los tramos del borde del dominio que caen en el mar son contornos abiertos, no costa: la resolución allí la fijan
+la profundidad y la distancia a la costa real, no el borde dibujado.
+
+<!-- lite:
 ![Malla](img/ng_mesh.png){ width=800 }
 
 La página está ordenada en tarjetas numeradas, con *Guardar* y *Generar malla* siempre a mano en una barra fija abajo:
@@ -55,6 +64,9 @@ La página está ordenada en tarjetas numeradas, con *Guardar* y *Generar malla*
 3. **Malla actual**: estadísticas, CFL, tiempo estimado y visor.
 
 Pulsa *Generar malla* y verás el mapa interactivo de profundidades y la calidad.
+
+-->
+<!-- /pro -->
 
 ### Revisar la malla: estadísticas, mapa de resolución y tiempo estimado
 
@@ -89,7 +101,7 @@ tu ordenador a medida que ejecutas casos.
 hacer con los nodos de dentro (el diálogo muestra cuántos son y su profundidad mínima, mediana y máxima):
 fijar la profundidad (dragar un canal, rellenar un puerto o dar cota a un dique con un valor negativo), imponer
 una profundidad mínima (abrir un paso que el DEM cierra) o máxima (quitar un pozo espurio), sumar un valor, o
-suavizar con los nodos vecinos. *Aplicar a la malla actual* cambia `hgrid.gr3` al momento, sin remallar. Los
+suavizar con los nodos vecinos, o rellenar desde el entorno (una zona sin batimetría). *Aplicar a la malla actual* cambia `hgrid.gr3` al momento, sin remallar. Los
 retoques se guardan en el caso (`mesh.bathymetry_edits`), se aplican siempre sobre la batimetría original y se
 repiten solos si regeneras la malla; también sirven en una malla importada.
 
@@ -99,6 +111,7 @@ mesh:
     - {name: canal, op: set, value: 4, polygon: [[3.26, 39.41], [3.27, 39.41], [3.27, 39.42], [3.26, 39.42]]}
     - {name: talud, op: smooth, iterations: 5, polygon: [...]}
 ```
+
 
 ### Dominio idealizado: lados y fondo
 

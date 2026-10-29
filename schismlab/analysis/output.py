@@ -43,6 +43,7 @@ def open_run(rundir: str | Path, variables: list[str] | None = None) -> xr.Datas
         parts.append(xr.open_mfdataset([out / f"{v}_{n}.nc" for n in stacks], combine="nested", concat_dim="time"))
     ds = xr.merge(parts, compat="override")
     first = xr.open_dataset(out / f"out2d_{stacks[0]}.nc")
+    ds = _fix_start_minutes(ds, out / f"out2d_{stacks[0]}.nc")
     ds = ds.assign(x=first["SCHISM_hgrid_node_x"].values, y=first["SCHISM_hgrid_node_y"].values)
     ds = ds.rename({NODE: "node"} if NODE in ds.dims else {})
     if LAYER in ds.dims:
@@ -50,6 +51,22 @@ def open_run(rundir: str | Path, variables: list[str] | None = None) -> xr.Datas
     ds.attrs["elements"] = (first["SCHISM_hgrid_face_nodes"].values[:, :3].astype(int) - 1)
     ds.attrs["rundir"] = str(rundir)
     return ds
+
+
+def _fix_start_minutes(ds: xr.Dataset, f: Path) -> xr.Dataset:
+    """SCHISM escribe en `units` la hora de inicio truncada («seconds since ...T17:00») aunque empiece a las 17:15; la
+    hora completa está en `base_date` («2006 6 15 17.25 0.00»). Se corrigen los tiempos con esa hora."""
+    with xr.open_dataset(f, decode_times=False) as raw:
+        bd = str(raw["time"].attrs.get("base_date", "")).split(); units = str(raw["time"].attrs.get("units", ""))
+    try:
+        hour = float(bd[3])
+    except (IndexError, ValueError):
+        return ds
+    m = re.search(r"since\s+\d{4}-\d{1,2}-\d{1,2}[T ](\d{1,2})(?::(\d{2}))?", units)
+    if not m or abs(hour - (int(m.group(1)) + int(m.group(2) or 0) / 60)) < 1e-6 or "time" not in ds.coords:
+        return ds
+    shift = np.timedelta64(int(round((hour - int(m.group(1)) - int(m.group(2) or 0) / 60) * 3600)), "s")
+    return ds.assign_coords(time=ds.time.values + shift)
 
 
 def nearest_node(ds: xr.Dataset, x: float, y: float) -> int:
@@ -88,8 +105,9 @@ def read_stations(rundir: str | Path, variable: str = "elev", start=None):
     if start is None:
         import re
         p = (rundir / "param.nml").read_text()
-        g = lambda k: int(float(re.search(rf"^\s*{k}\s*=\s*([\d.]+)", p, re.M).group(1)))
-        start = np.datetime64(f"{g('start_year'):04d}-{g('start_month'):02d}-{g('start_day'):02d}", "s") + np.timedelta64(g("start_hour") * 3600, "s")
+        g = lambda k: float(re.search(rf"^\s*{k}\s*=\s*([\d.]+)", p, re.M).group(1))
+        start = (np.datetime64(f"{int(g('start_year')):04d}-{int(g('start_month')):02d}-{int(g('start_day')):02d}", "s")
+                 + np.timedelta64(int(round(g("start_hour") * 3600)), "s"))        # start_hour con decimales (17.25 = 17:15)
     t = np.datetime64(start, "s") + (data[:, 0] * 1e9).astype("timedelta64[ns]")
     return pd.DataFrame(data[:, 1:], index=pd.DatetimeIndex(t), columns=names)
 

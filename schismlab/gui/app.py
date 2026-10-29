@@ -16,6 +16,7 @@ from .state import HOME, REPO, CaseInfo, gallery, load_cfg, save_cfg, new_case, 
 from ..edition import is_pro, edition, edition_name, default_generator
 from .brand import COLORS as BRAND, FONTS_LINK as BRAND_FONTS, FAVICON as BRAND_FAVICON, symbol_svg as brand_symbol, edition_badge
 LOGO = brand_symbol(34)   # cabecera: símbolo de la marca (schismlab/gui/brand)
+YAML_ZONE = "__yaml__"   # zona inundable escrita en el YAML como rectángulo o polígono (no es una zona de resolución)
 # flujo del caso: 6 pasos (Inicio e Instalación van en la cabecera, fuera del flujo)
 STEPS = [("mesh", "/mesh", "grid_on"), ("model", "/model", "tune"), ("forcing", "/forcing", "air"), ("outputs", "/outputs", "save"),
          ("params", "/params", "list_alt"), ("run", "/run", "play_circle"), ("results", "/results", "insights")]
@@ -64,7 +65,8 @@ def case_summary(c: dict, t: dict) -> list[tuple[str, str]]:
     if b.get("source"): forc.append(t["bc_nest_s"] if (b["source"] or {}).get("name") == "schismlab" else "Copernicus")
     if (c.get("waves") or {}).get("enabled"): forc.append("WWM")
     if f.get("rivers"): forc.append(f"{len(f['rivers'])} " + t["rivers"].lower())
-    if (c.get("mesh", {}) or {}).get("inundation"): forc.append(t["impacts"].lower())
+    if f.get("pressure_disturbance"): forc.append(t["meteotsunami_s"])
+    if (c.get("mesh", {}) or {}).get("inundation"): forc.append(t["inundation_s"])
     return [(t["domain_s"], dom), (t["duration_s"], dur + f" · {vert}"), (t["build_s"], bld), (t["forcings_s"], ", ".join(forc) or "—")]
 _DS_CACHE: dict = {}
 
@@ -265,6 +267,7 @@ async def run_job_process(target: str, args: tuple, log_el: ui.log, on_done=None
     if key:
         _JOBS[key] = job
     shown = 0; t_start = time.time(); last_change = {"t": t_start, "beat": t_start}
+    tt = T()                                                # textos al empezar: si se cierra el navegador, la sesión ya no existe
     def drain():
         while True:
             try:
@@ -283,7 +286,7 @@ async def run_job_process(target: str, args: tuple, log_el: ui.log, on_done=None
         if now - last_change["t"] >= 10 and now - last_change["beat"] >= 10:
             last_change["beat"] = now
             last = next((l for l in reversed(job.lines) if l.strip() and not l.startswith("…")), "")
-            job.lines.append(T()["still_working"].format(s=int(now - t_start), last=last[-90:]))
+            job.lines.append(tt["still_working"].format(s=int(now - t_start), last=last[-90:]))
     def poll():
         nonlocal shown
         for line in job.lines[shown:]:
@@ -299,11 +302,11 @@ async def run_job_process(target: str, args: tuple, log_el: ui.log, on_done=None
             await asyncio.sleep(0.5)
         proc.join(2); drain()
         if job.stopped:
-            job.error = T()["stopped_by_user"]
+            job.error = tt["stopped_by_user"]
         elif proc.exitcode not in (0, None) and job.error is None and not getattr(job, "finished", False):
             job.error = f"proceso terminado con código {proc.exitcode}"
         if job.error:
-            log_el.push(("ERROR " if not job.stopped else "") + job.error); ui.notify(job.error if job.stopped else T()["failed"], type="warning" if job.stopped else "negative")
+            log_el.push(("ERROR " if not job.stopped else "") + job.error); ui.notify(job.error if job.stopped else tt["failed"], type="warning" if job.stopped else "negative")
     finally:
         timer.active = False; poll(); job.done = True
     if job.error is None and on_done:
@@ -530,18 +533,34 @@ def layout(step: str):
                 except Exception:   # noqa: BLE001  (YAML inválido: la página lo avisa en el cuerpo)
                     st = {}
                 if ci:
-                    with ui.card().classes("sl-case-card q-pa-sm q-mb-md " + ("bg-grey-9" if dark else "bg-white")):
-                        with ui.row().classes("items-center no-wrap"):
-                            ui.icon("folder").classes("text-primary"); ui.label(ci.name).classes("text-subtitle1 text-weight-bold").style("min-width:0;overflow-wrap:anywhere;line-height:1.2")
+                    @ui.refreshable
+                    def case_card():
                         try:
-                            for lab, val in case_summary(load_cfg(ci.path), t):
-                                with ui.row().classes("no-wrap items-start q-gutter-xs"):
-                                    ui.label(lab).classes("text-caption text-grey-6").style("min-width:78px"); ui.label(val).classes("text-caption sl-val")
+                            st_ = ci.status()
                         except Exception:   # noqa: BLE001
-                            pass
-                        with ui.row().classes("items-center q-gutter-xs q-mt-xs"):
-                            for k, lab in (("mesh", "status_mesh"), ("setup", "status_setup"), ("run", "status_run")):
-                                status_chip(bool(st.get(k)), t[lab])
+                            st_ = {}
+                        with ui.card().classes("sl-case-card q-pa-sm q-mb-md " + ("bg-grey-9" if dark else "bg-white")):
+                            with ui.row().classes("items-center no-wrap"):
+                                ui.icon("folder").classes("text-primary"); ui.label(ci.name).classes("text-subtitle1 text-weight-bold").style("min-width:0;overflow-wrap:anywhere;line-height:1.2")
+                            try:
+                                for lab, val in case_summary(load_cfg(ci.path), t):
+                                    with ui.row().classes("no-wrap items-start q-gutter-xs"):
+                                        ui.label(lab).classes("text-caption text-grey-6").style("min-width:78px"); ui.label(val).classes("text-caption sl-val")
+                            except Exception:   # noqa: BLE001
+                                pass
+                            with ui.row().classes("items-center q-gutter-xs q-mt-xs"):
+                                for k, lab in (("mesh", "status_mesh"), ("setup", "status_setup"), ("run", "status_run")):
+                                    status_chip(bool(st_.get(k)), t[lab])
+                    case_card()
+                    _last = {"st": st}
+                    def _watch_status():                         # malla, ficheros o simulación terminados en esta página
+                        try:
+                            now_ = ci.status()
+                        except Exception:   # noqa: BLE001
+                            return
+                        if now_ != _last["st"]:
+                            _last["st"] = now_; case_card.refresh()
+                    ui.timer(4.0, _watch_status)
                 else:
                     ui.label(t["no_case"]).classes("text-caption text-grey-7 q-mb-md")
                 done = {"runs": None, "mesh": st.get("mesh"), "model": st.get("setup"), "forcing": st.get("setup"), "outputs": st.get("setup"), "params": st.get("setup"), "run": st.get("run"), "results": st.get("run")}
@@ -1020,6 +1039,8 @@ def page_mesh():
                         _ropts = {"": t["whole_domain"], **{rg.get("name", f"zona{j + 1}"): rg.get("name", f"zona{j + 1}") for j, rg in enumerate(regions)}}
                         coast_reg = ui.select(_ropts, value=safe_select(_ropts, creg0 if isinstance(creg0, str) else "", "", label=t["coast_zone"]), label=t["coast_zone"]).props("dense").classes("sl-w-md")
                         coast_reg.bind_visibility_from(coast, "value", backward=lambda v: v == "osm")
+                        struct0 = m.get("structures")
+                        coast_struct = ui.switch(t["coast_struct"], value=bool(struct0))
                     with ui.row().classes("row wrap q-col-gutter-sm items-center"):
                         bath = ui.select({k: v["desc"] for k, v in SOURCES.items()}, value=base_src if base_src in SOURCES else "gebco2021", label=t["bathy"], on_change=lambda e: show_extent()).classes("sl-w-lg")
                         bath_file = ui.input(t["bathy_file"], value=base_src if isinstance(base_src, str) and base_src not in SOURCES else "").props("dense clearable").classes("sl-w-lg")
@@ -1033,9 +1054,18 @@ def page_mesh():
                                     if _lsrc not in _srcs:                              # ruta a un fichero propio: opción propia
                                         _srcs[_lsrc] = str(_lsrc)
                                     ui.select(_srcs, value=_lsrc, label=t["bathy"]).props("dense").classes("sl-w-lg").on_value_change(lambda e, lay=lay: lay.update(source=e.value))
-                                    _lopts = {"": t["whole_domain"], **{rg.get("name", f"zona{j + 1}"): rg.get("name", f"zona{j + 1}") for j, rg in enumerate(regions)}}
-                                    ui.select(_lopts, value=safe_select(_lopts, lay.get("region", "") if isinstance(lay.get("region", ""), str) else "", "", label=t["regions"]),
-                                              label=t["regions"]).props("dense").classes("sl-w-md").on_value_change(lambda e, lay=lay: lay.update(region=e.value) if e.value else lay.pop("region", None))
+                                    _lr = lay.get("region"); _lyaml = _lr if isinstance(_lr, dict) else None     # zona del YAML (rectángulo o polígono)
+                                    _lopts = {"": t["whole_domain"], **({YAML_ZONE: t["inu_zone_yaml"]} if _lyaml else {}),
+                                              **{rg.get("name", f"zona{j + 1}"): rg.get("name", f"zona{j + 1}") for j, rg in enumerate(regions)}}
+                                    def _set_lreg(e, lay=lay, keep=_lyaml):
+                                        if e.value == YAML_ZONE:
+                                            lay["region"] = keep
+                                        elif e.value:
+                                            lay["region"] = e.value
+                                        else:
+                                            lay.pop("region", None)
+                                    ui.select(_lopts, value=YAML_ZONE if _lyaml else safe_select(_lopts, _lr if isinstance(_lr, str) else "", "", label=t["regions"]),
+                                              label=t["regions"]).props("dense").classes("sl-w-md").on_value_change(_set_lreg)
                                     ui.switch(t["land_only"], value=bool(lay.get("land_only", lay.get("source") in ("fabdem", "copdem30")))).props("dense").on_value_change(lambda e, lay=lay: lay.update(land_only=bool(e.value)))
                                     ui.number(t["blend_km"], value=float(lay.get("blend_km", 1.0)), min=0, step=0.5).props("dense").classes("sl-w-sm").on_value_change(lambda e, lay=lay: lay.update(blend_km=float(e.value)))
                                     ui.button(icon="close", on_click=lambda _, i=i: (layers.pop(i), layer_list.refresh())).props("flat dense round")
@@ -1066,12 +1096,18 @@ def page_mesh():
                         card_title(5, t["inundation"], "flood")
                         ui.space()
                         inu_on = ui.switch(t["inu_enable"], value=bool(inu0))
+                    _r0 = inu0.get("region") if isinstance(inu0, dict) else None
+                    inu_yaml = _r0 if isinstance(_r0, dict) and (_r0.get("polygon") or ("lon" in _r0 and "lat" in _r0)) else None   # zona del YAML
+
+                    def region_opts():
+                        return {"": t["whole_domain"], **({YAML_ZONE: t["inu_zone_yaml"]} if inu_yaml else {}),
+                                **{rg.get("name", f"zona{j + 1}"): rg.get("name", f"zona{j + 1}") for j, rg in enumerate(regions)}}
                     ui.label(t["inundation_hint"]).classes("text-caption text-grey-7")
                     inu_body = ui.column().classes("w-full q-gutter-sm")
                     with inu_body:
                         with ui.row().classes("row wrap q-col-gutter-sm items-center"):
-                            _iopts = {"": t["whole_domain"], **{rg.get("name", f"zona{j + 1}"): rg.get("name", f"zona{j + 1}") for j, rg in enumerate(regions)}}
-                            inu_region = ui.select(_iopts, value=safe_select(_iopts, inu0.get("region", "") if isinstance(inu0.get("region", ""), str) else "", "", label=t["inu_zone"]),
+                            _iopts = region_opts()
+                            inu_region = ui.select(_iopts, value=YAML_ZONE if inu_yaml else safe_select(_iopts, inu0.get("region", "") if isinstance(inu0.get("region", ""), str) else "", "", label=t["inu_zone"]),
                                                    label=t["inu_zone"]).props("dense").classes("sl-w-md")
                             inu_elev = ui.number(t["inu_elev"], value=float(inu0.get("max_elevation", 10)), min=1, step=1).props("dense").classes("sl-w-sm")
                             inu_size = ui.number(t["inu_size"], value=float(inu0.get("size", 50)), min=1, step=5).props("dense").classes("sl-w-md")
@@ -1177,6 +1213,13 @@ def page_mesh():
                         shapes[lay_.id] = rg_; colors[lay_.id] = col
                         lmap.run_layer_method(lay_.id, "bindTooltip", rg_.get("name", ""), {"sticky": True})
                         items.append((col, f"{rg_.get('name', '')} · {float(rg_.get('size', 0)):g} m" + (f" · {t['draw_inu'].lower()}" if is_inu else ""), is_inu))
+                    if inu_region.value == YAML_ZONE:                 # zona inundable escrita en el YAML (rectángulo o polígono)
+                        opts = {"color": INU_COLOR, "weight": 3, "fillOpacity": 0.12, "dashArray": "6 4"}
+                        if inu_yaml.get("polygon"):
+                            lmap.generic_layer(name="polygon", args=[[[p[1], p[0]] for p in inu_yaml["polygon"]], opts])
+                        elif "lon" in inu_yaml and "lat" in inu_yaml:
+                            lmap.generic_layer(name="rectangle", args=[[[inu_yaml["lat"][0], inu_yaml["lon"][0]], [inu_yaml["lat"][1], inu_yaml["lon"][1]]], opts])
+                        items.append((INU_COLOR, t["inu_zone_yaml"], True))
                     with legend_box:
                         for col, lab, dash in items:
                             with ui.row().classes("items-center no-wrap q-gutter-xs"):
@@ -1207,8 +1250,6 @@ def page_mesh():
                 with zones_box:
                     region_list()
 
-                def region_opts():
-                    return {"": t["whole_domain"], **{rg.get("name", f"zona{j + 1}"): rg.get("name", f"zona{j + 1}") for j, rg in enumerate(regions)}}
 
                 def sync_regions(inu=None, renamed=None):
                     """Tras anadir, quitar o renombrar zonas: refresca la lista y los selectores que las usan."""
@@ -1463,8 +1504,12 @@ def page_mesh():
                     mm["coastline"] = "gshhg"; mm.pop("coastline_region", None)
                 elif mm.get("coastline") in ("osm", "gshhg", "auto"):
                     mm.pop("coastline", None); mm.pop("coastline_region", None)
+                if coast_struct.value:
+                    mm["structures"] = struct0 if isinstance(struct0, dict) and struct0 else True   # conserva {width, types} del YAML
+                else:
+                    mm.pop("structures", None)
                 if inu_on.value:
-                    mm["inundation"] = {"region": inu_region.value or None, "max_elevation": float(inu_elev.value),
+                    mm["inundation"] = {"region": inu_yaml if inu_region.value == YAML_ZONE else (inu_region.value or None), "max_elevation": float(inu_elev.value),
                                         "dem": (inu_file.value or "").strip() or inu_dem.value, "size": float(inu_size.value), "transition_km": float(inu_tr.value),
                                         "contours": float(inu_ct.value or 0)}
                     if inu_lo.value:
@@ -1606,7 +1651,18 @@ def page_mesh():
                 ui.timer(0.8, fit, once=True); ui.timer(2.5, fit, once=True)   # reintento: el mapa puede no estar listo
 
                 edits = c_now.setdefault("mesh", {}).setdefault("bathymetry_edits", [])
-                ops = {"set": t["edit_set"], "min_depth": t["edit_min"], "max_depth": t["edit_max"], "offset": t["edit_offset"], "smooth": t["edit_smooth"]}
+                ops = {"set": t["edit_set"], "min_depth": t["edit_min"], "max_depth": t["edit_max"], "offset": t["edit_offset"], "smooth": t["edit_smooth"],
+                       "fill": t["edit_fill"]}
+                cedits = c_now["mesh"].setdefault("coastline_edits", [])        # retoques de la costa (antes de mallar)
+
+                def save_cedits():
+                    c2 = cfg(); c2.setdefault("mesh", {})["coastline_edits"] = [dict(e_) for e_ in cedits]
+                    if not cedits:
+                        c2["mesh"].pop("coastline_edits", None)
+                    eds_ = [dict(e_) for e_ in edits]; c2["mesh"]["bathymetry_edits"] = eds_
+                    if not eds_:
+                        c2["mesh"].pop("bathymetry_edits", None)
+                    save_cfg(case_path(), c2); edit_list.refresh()
 
                 def save_edits():
                     c2 = cfg(); c2.setdefault("mesh", {})["bathymetry_edits"] = [dict(e_) for e_ in edits]
@@ -1626,6 +1682,8 @@ def page_mesh():
                 def draw_edits():
                     for e_ in edits:
                         vmap.generic_layer(name="polygon", args=[[[p_[1], p_[0]] for p_ in e_["polygon"]], {"color": "#7b2cbf", "weight": 2, "fill": False, "dashArray": "4 4"}])
+                    for e_ in cedits:
+                        vmap.generic_layer(name="polygon", args=[[[p_[1], p_[0]] for p_ in e_["polygon"]], {"color": "#0077b6" if e_.get("op") == "water" else "#8d6e63", "weight": 2, "fillOpacity": 0.15}])
 
                 def on_view_draw(e):
                     lyr = e.args.get("layer", {}); latlngs = (lyr.get("_latlngs") or [[]])[0]
@@ -1642,6 +1700,7 @@ def page_mesh():
                         with ui.tabs().props("dense no-caps align=left") as tabs:
                             tab_edit = ui.tab(t["edit_tab"], icon="landscape")
                             tab_ref = ui.tab(t["refine_tab"], icon="grid_on") if can_refine else None
+                            tab_coast = ui.tab(t["coast_tab"], icon="water") if gen.value not in ("idealized", "file") else None
                         with ui.tab_panels(tabs, value=tab_ref or tab_edit).classes("w-full"):
                             with ui.tab_panel(tab_edit):
                                 eop = ui.select(ops, value="set", label=t["edit_op"]).props("dense").classes("sl-w-lg")
@@ -1649,13 +1708,13 @@ def page_mesh():
                                     evl = ui.number(t["edit_value"], value=round(float(np.median(dep)), 1) if dep.size else 5.0, step=0.5).props("dense").classes("sl-w-sm")
                                     eit = ui.number(t["edit_iter"], value=5, min=1, max=100, step=1).props("dense").classes("sl-w-sm")
                                 eit.bind_visibility_from(eop, "value", backward=lambda v: v == "smooth")
-                                evl.bind_visibility_from(eop, "value", backward=lambda v: v != "smooth")
+                                evl.bind_visibility_from(eop, "value", backward=lambda v: v not in ("smooth", "fill"))
 
                                 def add_edit():
                                     ed_ = {"name": f"retoque{len(edits) + 1}", "op": eop.value, "polygon": pts}
                                     if eop.value == "smooth":
                                         ed_["iterations"] = int(eit.value or 5)
-                                    else:
+                                    elif eop.value != "fill":
                                         ed_["value"] = float(evl.value or 0.0)
                                     edits.append(ed_); save_edits(); dlg.close(); ui.notify(t["edit_added"], type="positive")
                                     return ed_
@@ -1665,6 +1724,24 @@ def page_mesh():
                                     ui.button(t["edits_apply"], icon="check", on_click=add_and_apply).props("color=accent")
                                     ui.button(t["save"], icon="add", on_click=add_edit).props("outline")
                                     ui.button("✕", on_click=dlg.close).props("flat")
+                            if tab_coast is not None:
+                                with ui.tab_panel(tab_coast):
+                                    ui.label(t["coast_hint"]).classes("text-caption text-grey-7")
+                                    cn = ui.input(t["name"], value=f"costa{len(cedits) + 1}").props("dense").classes("sl-w-md")
+                                    cop = ui.select({"water": t["coast_water"], "land": t["coast_land"]}, value="water", label=t["coast_op"]).props("dense").classes("sl-w-lg")
+                                    cfill = ui.switch(t["coast_fill"], value=True).bind_visibility_from(cop, "value", backward=lambda v: v == "water")
+
+                                    def add_coast():
+                                        cedits.append({"name": cn.value or f"costa{len(cedits) + 1}", "op": cop.value, "polygon": pts})
+                                        if cop.value == "water" and cfill.value:       # la zona nueva no tiene batimetría
+                                            edits.append({"name": f"{cn.value or 'costa'}_relleno", "op": "fill", "polygon": pts})
+                                        save_cedits(); dlg.close(); ui.notify(t["coast_added"], type="positive", timeout=8000)
+                                    async def add_coast_regen():
+                                        add_coast(); await generate()
+                                    with ui.row().classes("q-mt-sm"):
+                                        ui.button(t["save"], icon="add", on_click=add_coast).props("color=accent")
+                                        ui.button(t["regenerate"], icon="grid_on", on_click=add_coast_regen).props("outline")
+                                        ui.button("✕", on_click=dlg.close).props("flat")
                             if tab_ref is not None:
                                 with ui.tab_panel(tab_ref):
                                     rn = ui.input(t["name"], value=f"zona{len(regions) + 1}").props("dense")
@@ -1693,6 +1770,15 @@ def page_mesh():
                         pending = done_ != edits_cfg({"bathymetry_edits": edits})
                     except Exception:   # noqa: BLE001
                         done_, pending = [], True
+                    if cedits:
+                        with ui.card().classes("q-pa-md w-full q-mt-sm"):
+                            ui.label(t["coast_edits"]).classes("text-subtitle1 text-weight-bold")
+                            ui.label(t["coast_list_hint"]).classes("text-caption text-grey-7")
+                            for i_, e_ in enumerate(cedits):
+                                with ui.row().classes("items-center q-gutter-sm"):
+                                    ui.icon("water" if e_.get("op") == "water" else "terrain", color="blue-8" if e_.get("op") == "water" else "brown")
+                                    ui.label(f"{i_ + 1}. {e_.get('name', '')} · {t['coast_water'] if e_.get('op') == 'water' else t['coast_land']} · {len(e_['polygon'])} {t['vertices']}")
+                                    ui.button(icon="close", on_click=lambda _, i_=i_: (cedits.pop(i_), save_cedits())).props("flat dense round")
                     if not edits and not done_:
                         return
                     with ui.card().classes("q-pa-md w-full q-mt-sm"):
@@ -1701,7 +1787,8 @@ def page_mesh():
                         for i_, e_ in enumerate(edits):
                             with ui.row().classes("items-center q-gutter-sm"):
                                 ui.icon("landscape", color="purple")
-                                val_ = f"{e_.get('iterations', 5)} ×" if e_["op"] == "smooth" else f"{float(e_.get('value', 0)):g} m"
+                                val_ = (f"{e_.get('iterations', 5)} ×" if e_["op"] == "smooth" else
+                                        t["edit_fill_s"] if e_["op"] == "fill" else f"{float(e_.get('value', 0)):g} m")
                                 ui.label(f"{i_ + 1}. {e_.get('name', '')} · {ops.get(e_['op'], e_['op'])} · {val_} · {len(e_['polygon'])} {t['vertices']}")
                                 ui.button(icon="close", on_click=lambda _, i_=i_: (edits.pop(i_), save_edits())).props("flat dense round")
                         with ui.row().classes("row wrap q-col-gutter-sm items-center"):
@@ -1810,13 +1897,16 @@ def page_model():
         lang_ = S().get("lang", "es")
         with ui.expansion(t["time"], icon="schedule", value=True).classes("sl-exp w-full") as exp_time:
             with ui.row().classes("row wrap q-col-gutter-sm"):
-                start = ui.input(t["start"], value=str(tm.get("start", "2020-01-01"))[:10]).props("type=date").classes("sl-w-md")
+                _st = str(tm.get("start", "2020-01-01")).replace(" ", "T")
+                start = ui.input(t["start"], value=_st[:10]).props("type=date").classes("sl-w-md")
+                start_h = ui.input(t["start_hour"], value=(_st[11:16] if len(_st) >= 16 else "00:00")).props("type=time").classes("sl-w-sm")
                 days = ui.number(t["days"], value=float(tm.get("days", 2)), min=0.01, step=0.5).classes("sl-w-sm")
                 dt = ui.number(t["dt"], value=float(tm.get("dt", 60)), min=1, step=10).classes("sl-w-sm")
                 ramp = ui.number(t["ramp"], value=float(tm.get("ramp_days", 0.5)), min=0, step=0.25).classes("sl-w-sm")
             def time_caption():
-                set_caption(exp_time, f"{fmt_num(days.value, lang_, 1)} {t['days_s']} · Δt {fmt_num(dt.value, lang_)} s · {start.value}")
-            for w_ in (start, days, dt):
+                hh = start_h.value if start_h.value and start_h.value != "00:00" else ""
+                set_caption(exp_time, f"{fmt_num(days.value, lang_, 1)} {t['days_s']} · Δt {fmt_num(dt.value, lang_)} s · {start.value}" + (f" {hh}" if hh else ""))
+            for w_ in (start, start_h, days, dt):
                 w_.on_value_change(lambda e: time_caption())
             time_caption()
             dt_hint = ui.label(t["dt_hint_wait"]).classes("text-caption text-grey-7")
@@ -1979,7 +2069,8 @@ def page_model():
                 c2["friction"]["landcover"] = msrc.value
                 if msrc.value == "corine":
                     c2["friction"]["file"] = mfile.value
-            c2["time"] = {"start": start.value, "days": float(days.value), "dt": float(dt.value), "ramp_days": float(ramp.value)}
+            _h = (start_h.value or "00:00")[:5]                       # hora de inicio (UTC): solo se escribe si no es 00:00
+            c2["time"] = {"start": start.value if _h == "00:00" else f"{start.value}T{_h}", "days": float(days.value), "dt": float(dt.value), "ramp_days": float(ramp.value)}
             vv = {"type": vt.value}
             if vt.value == "sigma":
                 vv.update(nvrt=int(nvrt.value), h_c=float(hc.value), theta_b=float(tb.value or 0), theta_f=float(tf.value))
@@ -2730,6 +2821,7 @@ def page_params():
                     show_all = ui.switch(t["show_all"], value=False).props("dense")
                     ui.label(f"{len(entries)} {t['n_params']}").classes("text-caption text-grey-7")
                 rows: list[tuple[dict, ui.element]] = []
+                sec_exp: dict[str, tuple] = {}                # sección -> (expansión, nº de parámetros)
                 def build_section(exp, sec_entries, f=f, ov=ov, rows=rows):
                     with exp:
                         for e in sec_entries:
@@ -2758,7 +2850,8 @@ def page_params():
                                         with ui.expansion("ℹ").props("dense header-class=text-caption").classes("text-caption text-grey-7"):
                                             ui.label(lh).classes("text-caption").style("white-space:pre-wrap")
                                 inp.on_value_change(lambda ev, b=badge, e=e: b.set_text(t["status_default"] if ev.value == e.default else t["status_custom"]))
-                            rows.append(({"name": e.name.lower(), "help": (e.help(lang) + " " + e.long_help()).lower(), "foreign": foreign, "inp": inp, "default": e.default}, row))
+                            rows.append(({"name": e.name.lower(), "help": (e.help(lang) + " " + e.long_help()).lower(), "foreign": foreign, "inp": inp, "default": e.default,
+                                          "sec": e.section}, row))
                             if foreign:
                                 row.set_visibility(False)
                 def build_all(f=f):                               # buscar o filtrar: hacen falta todas las secciones
@@ -2770,6 +2863,7 @@ def page_params():
                     first = any(e.name == "rnday" for e in sec_entries) or (k_ == 0 and f != "param.nml")
                     with ui.expansion(f"&{sec}  ({len(sec_entries)})", icon="folder_open", value=first).classes("w-full q-mb-sm") as exp:
                         pass
+                    sec_exp[sec] = (exp, len(sec_entries))
                     if first:
                         build_section(exp, sec_entries)
                     else:
@@ -2781,9 +2875,10 @@ def page_params():
                             return go
                         fn = _mk(); builders[f].append((exp, fn))
                         exp.on_value_change(lambda e, fn=fn, exp=exp, f=f: (fn(), builders[f].remove((exp, fn)) if (exp, fn) in builders[f] else None))
-                def apply_filter(rows=rows, search=search, only_changed=only_changed, show_all=show_all, build_all=build_all):
+                def apply_filter(rows=rows, search=search, only_changed=only_changed, show_all=show_all, build_all=build_all, sec_exp=sec_exp):
                     build_all()
                     q = (search.value or "").lower().strip()
+                    hits: dict[str, int] = {}
                     for meta, row in rows:
                         vis = (not meta["foreign"] or show_all.value)
                         if q:
@@ -2791,6 +2886,13 @@ def page_params():
                         if only_changed.value:
                             vis = vis and meta["inp"].value != meta["default"]
                         row.set_visibility(vis)
+                        hits[meta["sec"]] = hits.get(meta["sec"], 0) + int(vis)
+                    filtering = bool(q) or only_changed.value
+                    for sec_, (exp_, n_) in sec_exp.items():           # cuántos coinciden en cada sección; se abren las que tienen
+                        k_ = hits.get(sec_, 0)
+                        exp_._props["label"] = f"&{sec_}  ({k_} {t['of']} {n_})" if filtering else f"&{sec_}  ({n_})"; exp_.update()
+                        if filtering:
+                            exp_.set_value(k_ > 0)
                 search.on_value_change(lambda e, fn=apply_filter: fn()); only_changed.on_value_change(lambda e, fn=apply_filter: fn()); show_all.on_value_change(lambda e, fn=apply_filter: fn())
                 gen = wd / f
                 with ui.expansion(t["preview"], icon="description").classes("w-full q-mt-md"):
@@ -2888,7 +2990,8 @@ def page_run():
             from ..estimate import estimate, fmt_range
             el_ = estimate(c, int(q.get("nodes", 0) or 0)); ec_ = estimate(c, int(q.get("nodes", 0) or 0), 128, cluster=True)
             _lg = S().get("lang", "es")
-            checks.append((dt <= 10 * q.get("dt_cfl_p5_s", dt), f"dt = {fmt_num(dt, _lg)} s · CFL {fmt_num(q.get('dt_cfl_p5_s', 0), _lg)} s · {t['est']}: {fmt_range(el_, _lg)} ({el_['nprocs']} {t['cores']})"
+            # SCHISM es semiimplícito: no hay límite de CFL explícito (el criterio es CFL > 0,4, en Dominio y malla y en Física)
+            checks.append((True, f"dt = {fmt_num(dt, _lg)} s · {t['est']}: {fmt_range(el_, _lg)} ({el_['nprocs']} {t['cores']})"
                            + (f" · {t['cluster']}: {fmt_range(ec_, _lg)}" if PRO else "")))
         with ui.card().classes("q-pa-md w-full"):
             ui.label(t["checks"]).classes("text-subtitle1 text-weight-bold")
@@ -3415,7 +3518,9 @@ def _results_content(tab_key: str):
                     ui.button(t["runup_run"], icon="waves", on_click=do_runup).props("color=secondary")
             with ui.card().classes("q-pa-md w-full"):
                 with ui.row().classes("row wrap q-col-gutter-sm items-center"):
-                    res = ui.number(t["impacts_res"], value=float(ic.get("resolution_m", 30)), min=5, step=5).props("dense").classes("sl-w-sm")
+                    _inu_s = ((c.get("mesh") or {}).get("inundation") or {}) if isinstance((c.get("mesh") or {}).get("inundation"), dict) else {}
+                    _res0 = ic.get("resolution_m") or min(30.0, max(2.0, float(min(_inu_s.get("size", 30), ((_inu_s.get("urban") or {}) if isinstance(_inu_s.get("urban"), dict) else {}).get("size", 30)))))
+                    res = ui.number(t["impacts_res"], value=float(_res0), min=2, step=1).props("dense").classes("sl-w-sm")
                     thr = ui.number(t["impacts_thr"], value=float(ic.get("threshold_m", 0.05)), min=0, step=0.05).props("dense").classes("sl-w-sm")
                     bld = ui.switch(t["impacts_bld"], value=str(ic.get("buildings", "catastro")) == "catastro")
                     pf = ui.number(t["impacts_pf"], value=float(ic.get("price_factor", 1.0)), min=0.1, step=0.1).props("dense").classes("sl-w-md")

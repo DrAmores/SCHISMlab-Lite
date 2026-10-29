@@ -18,7 +18,7 @@ from .quality import mesh_quality
 log = logging.getLogger(__name__)
 
 def build_mesh(case: Case, outdir: Path | None = None, plot: bool = True) -> Mesh:
-    cfg = case.section("mesh")
+    cfg = case_files_absolute(case.section("mesh"), case.dir)
     outdir = Path(outdir or case.workdir); outdir.mkdir(parents=True, exist_ok=True)
     gen = cfg.get("generator", default_generator())
     if gen == "idealized":
@@ -101,6 +101,25 @@ def bbox(cfg: dict):
         x0, y0, x1, y1 = poly.bounds
         return (x0, x1), (y0, y1)
     return tuple(map(float, cfg["lon"])), tuple(map(float, cfg["lat"]))
+
+
+def case_files_absolute(cfg: dict, base: Path) -> dict:
+    """Copia de mesh con las rutas relativas de las capas de batimetría y del DEM de inundación resueltas desde la
+    carpeta del YAML (si existen allí), y no desde la carpeta en la que se ejecuta (en el clúster no coinciden)."""
+    import copy
+    cfg = copy.deepcopy(cfg); base = Path(base)
+    def fix(v):
+        if isinstance(v, str) and v.strip() and not Path(v).expanduser().is_absolute() and (base / v).exists():
+            return str((base / v).resolve())
+        return v
+    b = cfg.get("bathymetry")
+    if isinstance(b, list):
+        cfg["bathymetry"] = [dict(l, source=fix(l.get("source"))) if isinstance(l, dict) else fix(l) for l in b]
+    elif isinstance(b, str):
+        cfg["bathymetry"] = fix(b)
+    if isinstance(cfg.get("inundation"), dict) and "dem" in cfg["inundation"]:
+        cfg["inundation"] = dict(cfg["inundation"], dem=fix(cfg["inundation"]["dem"]))
+    return cfg
 
 
 def bathymetry_layers(cfg: dict) -> tuple:

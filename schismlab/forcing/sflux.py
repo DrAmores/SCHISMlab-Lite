@@ -25,7 +25,9 @@ def write_sflux(outdir: str | Path, lon: np.ndarray, lat: np.ndarray, times: np.
         old.unlink()
     (outdir / "sflux_inputs.txt").write_text("&sflux_inputs\n/\n")
     LON, LAT = np.meshgrid(lon, lat)
-    start = np.datetime64(start, "s")
+    # SCHISM toma de base_date solo el día (la hora no cuenta): los tiempos van desde las 00:00 del día de inicio, si no
+    # una simulación que empieza a las 17:15 busca el forzamiento a las 00:00 y se para («no appropriate time exists»)
+    start = np.datetime64(start, "D").astype("datetime64[s]")
     tdays = (np.asarray(times, "datetime64[s]") - start) / np.timedelta64(1, "D")
     nt = len(tdays)
     files = []
@@ -41,9 +43,9 @@ def write_sflux(outdir: str | Path, lon: np.ndarray, lat: np.ndarray, times: np.
         ds = xr.Dataset(data, coords={"time": ("time", tdays[sl].astype("float32")),
                                       "lon": (("ny_grid", "nx_grid"), LON.astype("float32")),
                                       "lat": (("ny_grid", "nx_grid"), LAT.astype("float32"))})
-        y, mo, d, h = [int(s) for s in (np.datetime_as_string(start, "h").replace("T", "-").split("-"))]
-        ds.time.attrs.update(long_name="Time", standard_name="time", units=f"days since {y:04d}-{mo:02d}-{d:02d} {h:02d}:00:00",
-                             base_date=np.array([y, mo, d, h], "int32"))
+        y, mo, d = [int(s) for s in np.datetime_as_string(start, "D").split("-")]
+        ds.time.attrs.update(long_name="Time", standard_name="time", units=f"days since {y:04d}-{mo:02d}-{d:02d} 00:00:00",
+                             base_date=np.array([y, mo, d, 0], "int32"))
         ds.lon.attrs.update(long_name="Longitude", standard_name="longitude", units="degrees_east")
         ds.lat.attrs.update(long_name="Latitude", standard_name="latitude", units="degrees_north")
         ds.uwind.attrs.update(long_name="Surface Eastward Air Velocity (10m AGL)", standard_name="eastward_wind", units="m/s")
