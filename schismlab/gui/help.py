@@ -33,6 +33,7 @@ HELP = {
   "grade": "Cuánto puede crecer el tamaño entre elementos vecinos (fracción). Menor = transiciones más suaves y más nodos. Típico: 0.15–0.3.",
   "open_b": "Si está activo, los tramos del borde del dominio que caen en el mar son contornos abiertos (por donde entra la marea); si no, todo el borde es pared.",
   "regions": "Zona de alta resolución en la que se aplica esta capa (las zonas se dibujan en el mapa). «Toda la malla» la aplica en todo el dominio.",
+  "layer_zone": "Dónde se usa esta capa: toda la malla, una zona de alta resolución o una zona propia dibujada con el lápiz (no refina la malla). Debajo de la capa se resume cómo cae respecto a las zonas de alta resolución.",
   "region_size": "Tamaño de los elementos dentro de esta zona (m).",
   "min_depth_l": "Profundidad mínima (m) que se impone en el mar fuera de la zona inundable: evita nodos secos por errores de la batimetría junto a la costa. Típico: 1–3 m.",
   "inu_enable": "Activa la inundación: la malla entra en tierra en la zona inundable hasta la cota máxima y SCHISM moja y seca los nodos.",
@@ -56,6 +57,11 @@ HELP = {
   "coast_zone": "Zona donde se usa la costa de OSM (GSHHG en el resto). «Toda la malla» la usa en todo el dominio: solo para dominios pequeños (menos de ~6 grados²).",
   "edit_op": "Qué se hace con los nodos de dentro: fijar la profundidad, imponer un mínimo (abrir un canal) o un máximo (quitar un pozo), sumar un valor, suavizar con los vecinos o rellenar desde el borde.",
   "coast_op": "Mar: quita un dique o un relleno que no existía en la fecha del caso (Son Blanc, en Ciutadella en 2006). Tierra: añade una obra. Se aplica al generar la malla.",
+  "drawopt_domain": "El contorno del modelo (polígono o rectángulo). Los lados que caen en el mar son contornos abiertos; la costa es pared.",
+  "drawopt_region": "Zonas con elementos más pequeños que la resolución mínima (tamaño y transición en la tabla de debajo del mapa). Cambian la malla, no los datos.",
+  "drawopt_inu": "Zona donde la tierra baja, hasta la cota máxima de la tarjeta Inundación, entra en el dominio y se malla con el tamaño de tierra.",
+  "drawopt_bathy": "Zona donde se usa una capa de batimetría (tarjeta Costa y batimetría). Cambia la profundidad, no el tamaño de los elementos: puede coincidir con una zona de alta resolución, solaparse en parte o no tocar ninguna.",
+  "drawopt_edges": "No se dibuja: un clic junto a un lado del dominio cambia su tipo (forzado, radiación o pared).",
   "coast_struct": "Pasa a tierra los diques y espigones de OpenStreetMap en las zonas de detalle, aunque sean más estrechos que los elementos (el suavizado de la costa los borraría). Los pantalanes no: dejan pasar el agua.",
   "coast_fill": "La zona que pasa a ser mar no tiene batimetría (las fuentes la tenían como tierra). Con esto se añade un retoque «rellenar desde el entorno» con el mismo polígono.",
   "edit_value": "Profundidad (m, positiva hacia abajo; negativa = cota sobre el mar) o, en «sumar», metros que se añaden. No se usa al suavizar.",
@@ -301,6 +307,7 @@ HELP = {
   "grade": "How fast element size may grow between neighbours (fraction). Lower = smoother transitions and more nodes. Typical: 0.15–0.3.",
   "open_b": "If on, border segments that lie at sea are open boundaries (where the tide enters); otherwise the whole border is a wall.",
   "regions": "High-resolution zone where this layer applies (zones are drawn on the map). 'Whole mesh' applies it to the whole domain.",
+  "layer_zone": "Where this layer is used: the whole mesh, a high-resolution zone or an own zone drawn with the pencil (it does not refine the mesh). Below the layer, a summary of how it falls on the high-resolution zones.",
   "region_size": "Element size inside this zone (m).",
   "min_depth_l": "Minimum depth (m) imposed at sea outside the floodable zone: avoids dry nodes from bathymetry errors near the coast. Typical: 1–3 m.",
   "inu_enable": "Enables flooding: the mesh extends over land in the floodable zone up to the maximum elevation and SCHISM wets and dries the nodes.",
@@ -324,6 +331,11 @@ HELP = {
   "coast_zone": "Zone where the OSM coastline is used (GSHHG elsewhere). 'Whole mesh' uses it over the whole domain: only for small domains (under ~6 square degrees).",
   "edit_op": "What happens to the nodes inside: set the depth, impose a minimum (open a channel) or a maximum (remove a pit), add a value, smooth with the neighbours or fill from the edge.",
   "coast_op": "Sea: removes a breakwater or landfill that did not exist at the date of the case (Son Blanc, Ciutadella, 2006). Land: adds a construction. Applied when the mesh is generated.",
+  "drawopt_domain": "The model outline (polygon or rectangle). Sides at sea become open boundaries; the coast is a wall.",
+  "drawopt_region": "Zones with elements smaller than the minimum resolution (size and transition in the table below the map). They change the mesh, not the data.",
+  "drawopt_inu": "Zone where low land, up to the maximum elevation in the Flooding card, joins the domain and is meshed at the land size.",
+  "drawopt_bathy": "Zone where a bathymetry layer is used (Coastline and bathymetry card). It changes the depth, not the element size: it may match a high-resolution zone, overlap it partly or touch none.",
+  "drawopt_edges": "Nothing to draw: clicking next to a side of the domain changes its type (forced, radiation or wall).",
   "coast_struct": "Turns the OpenStreetMap breakwaters and groynes in the detail zones into land, even when narrower than the elements (coastline smoothing would erase them). Not piers: water flows under them.",
   "coast_fill": "The area that becomes sea has no bathymetry (the sources had it as land). This adds a «fill from the surroundings» edit with the same polygon.",
   "edit_value": "Depth (m, positive downwards; negative = height above sea level) or, for 'add', metres added. Not used when smoothing.",
@@ -591,6 +603,28 @@ def attach(el, txt: str) -> None:
             ic.bind_visibility_from(el, "visible")   # el icono se oculta con su interruptor (sin (i) huérfanos)
     except Exception:                            # noqa: BLE001  (la ayuda nunca debe romper la página)
         pass
+
+
+def toggle_help(tg, keys: dict, lang: str = "es"):
+    """Icono (i) con su ayuda dentro de cada botón de un ui.toggle: keys = {valor de la opción: clave de HELP}."""
+    hp = HELP.get(lang, HELP["es"])
+    slots = {}
+    for i, v in enumerate(tg._values):
+        txt = hp.get(keys.get(v, ""), "")
+        if not txt:
+            continue
+        slots[i] = f"help{i}"
+        with tg.add_slot(f"help{i}"):
+            with ui.icon("info_outline", size="16px").classes("text-grey-6 cursor-help q-ml-xs"):
+                ui.tooltip(txt).props(_TIP).classes("text-body2")
+    upd = tg._update_options
+    def _update_options():                       # las opciones se regeneran al actualizar: se vuelven a enlazar los slots
+        upd()
+        for i, name in slots.items():
+            tg._props["options"][i]["slot"] = name
+    tg._update_options = _update_options
+    _update_options(); tg.update()
+    return tg
 
 
 def hint(el, key: str, lang: str = "es"):

@@ -41,7 +41,8 @@ def test_help_labels_do_not_collide():
 
 def test_keys_are_real_labels():
     for key in HELP["es"]:
-        assert key in TEXT["es"] or key in LITERALS or key in ("Manning n", "T (°C)", "S (psu)"), f"ayuda sin campo: {key}"
+        assert key in TEXT["es"] or key in LITERALS or key in ("Manning n", "T (°C)", "S (psu)") \
+            or key.startswith("drawopt_"), f"ayuda sin campo: {key}"   # drawopt_: opciones de «Dibujar» (toggle_help)
 
 
 def test_references_resolve_and_are_short():

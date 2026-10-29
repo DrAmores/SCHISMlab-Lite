@@ -3,6 +3,11 @@
 Las novedades de cada versión de SCHISMlab Lite, en lenguaje normal. La interfaz las muestra en **Actualizar** cuando
 hay una versión nueva.
 
+## 0.8.1 (2026-10-29) — Mantenimiento
+
+- Mantenimiento interno: el explorador de carpetas también puede elegir ficheros. No hay cambios visibles en la
+  interfaz de Lite.
+
 ## 0.8.0 (2026-10-29) — Hora de inicio con minutos y búsqueda de parámetros
 
 - Hora de inicio con minutos: campo «Hora de inicio (UTC)» en Física. Antes, un inicio que no fuera a las 00:00 con

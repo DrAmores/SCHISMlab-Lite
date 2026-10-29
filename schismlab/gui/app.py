@@ -16,7 +16,8 @@ from .state import HOME, REPO, CaseInfo, gallery, load_cfg, save_cfg, new_case, 
 from ..edition import is_pro, edition, edition_name, default_generator
 from .brand import COLORS as BRAND, FONTS_LINK as BRAND_FONTS, FAVICON as BRAND_FAVICON, symbol_svg as brand_symbol, edition_badge
 LOGO = brand_symbol(34)   # cabecera: símbolo de la marca (schismlab/gui/brand)
-YAML_ZONE = "__yaml__"   # zona inundable escrita en el YAML como rectángulo o polígono (no es una zona de resolución)
+YAML_ZONE = "__yaml__"   # zona propia (rectángulo o polígono) de la zona inundable o de una capa: no es una zona de resolución
+BATHY_EXTS = (".tif", ".tiff", ".nc", ".xyz")                    # batimetría o topografía propia
 # flujo del caso: 6 pasos (Inicio e Instalación van en la cabecera, fuera del flujo)
 STEPS = [("mesh", "/mesh", "grid_on"), ("model", "/model", "tune"), ("forcing", "/forcing", "air"), ("outputs", "/outputs", "save"),
          ("params", "/params", "list_alt"), ("run", "/run", "play_circle"), ("results", "/results", "insights")]
@@ -1006,12 +1007,14 @@ def page_mesh():
                     card_title(2, t["mesh_card_draw"], "draw")
                     with ui.row().classes("items-center q-gutter-sm w-full"):
                         ui.label(t["draw_what"]).classes("text-body2")
-                        draw_target = ui.toggle({"domain": t["domain"], "region": t["regions"], "inu": t["draw_inu"], "edges": t["draw_edges"]}, value="domain").props("dense no-caps")
+                        draw_target = ui.toggle({"domain": t["domain"], "region": t["regions"], "inu": t["draw_inu"], "bathy": t["draw_bathy"], "edges": t["draw_edges"]}, value="domain").props("dense no-caps")
                         ui.space()
                         edit_btn = ui.button(t["edit_polys"], icon="edit_location_alt").props("outline dense")
                         clear_btn = ui.button(t["clear"], icon="delete").props("flat dense color=negative")
+                    from .help import toggle_help
+                    toggle_help(draw_target, {k_: f"drawopt_{k_}" for k_ in ("domain", "region", "inu", "bathy", "edges")}, S().get("lang", "es"))
                     draw_help = ui.label().classes("text-caption text-grey-7")
-                    draw_target.on_value_change(lambda e: (draw_help.set_text(t[{"domain": "draw_hint", "region": "draw_hint_region", "inu": "draw_hint_inu", "edges": "draw_hint_edges"}[e.value]]), redraw()))
+                    draw_target.on_value_change(lambda e: (draw_help.set_text(t[{"domain": "draw_hint", "region": "draw_hint_region", "inu": "draw_hint_inu", "bathy": "draw_hint_bathy", "edges": "draw_hint_edges"}[e.value]]), redraw()))
                     draw_help.set_text(t["draw_hint"])
                     center = (float(np.mean([p[1] for p in poly])), float(np.mean([p[0] for p in poly]))) if poly else (39.5, 2.8)
                     lmap = ui.leaflet(center=center, zoom=7, draw_control={
@@ -1044,31 +1047,83 @@ def page_mesh():
                     with ui.row().classes("row wrap q-col-gutter-sm items-center"):
                         bath = ui.select({k: v["desc"] for k, v in SOURCES.items()}, value=base_src if base_src in SOURCES else "gebco2021", label=t["bathy"], on_change=lambda e: show_extent()).classes("sl-w-lg")
                         bath_file = ui.input(t["bathy_file"], value=base_src if isinstance(base_src, str) and base_src not in SOURCES else "").props("dense clearable").classes("sl-w-lg")
-                    with ui.expansion(t["bathy_layers"], icon="layers", value=bool(layers)).classes("w-full"):
+                        async def _browse_base():
+                            from .folder_picker import pick_file
+                            f = await pick_file(bath_file.value or (case_path() or Path.home()).parent, t, BATHY_EXTS, title=t["browse_bathy"])
+                            if f:
+                                bath_file.set_value(f)
+                        ui.button(icon="folder_open", on_click=_browse_base).props("flat dense round").tooltip(t["browse_bathy"]).mark("browse_bathy")
+                    with ui.expansion(t["bathy_layers"], icon="layers", value=bool(layers)).classes("w-full") as layers_exp:
                         ui.label(t["bathy_layers_hint"]).classes("text-caption text-grey-7")
+                        pending = {"lay": None}                     # capa a la que irá la próxima zona dibujada en modo «Zona de batimetría»
+                        def redraw_soon():                          # fuera del manejador: redraw rehace la lista de capas
+                            ui.timer(0.05, lambda: redraw(), once=True)
+                        def overlap_note(lay):
+                            """Cómo cae la zona de la capa respecto al dominio y a las zonas de alta resolución (son independientes)."""
+                            reg = lay.get("region")
+                            if not reg:
+                                return
+                            try:
+                                ov = _pro_data_bathymetry.layer_overlap(reg, regions, poly, float(lay.get("blend_km", 1.0) or 0))
+                            except Exception:   # noqa: BLE001
+                                return
+                            if not ov:
+                                return
+                            msgs = []; warn = False
+                            if ov["outside"] > 1:
+                                msgs.append(t["ov_outside"].format(p=ov["outside"])); warn = True
+                            for o in ov["regions"]:
+                                msgs.append(t["ov_region"].format(name=o["name"], size=o["size"], cover=o["cover"], full=o["full"]))
+                            if not ov["regions"]:
+                                msgs.append(t["ov_none"])
+                            elif ov["coarse"] > 1:
+                                msgs.append(t["ov_coarse"].format(p=ov["coarse"]))
+                            if any(o["cover"] < 99.5 for o in ov["regions"]):
+                                msgs.append(t["ov_partial"])
+                            elif any(o["full"] < 99.5 for o in ov["regions"]):
+                                msgs.append(t["ov_blend"]); warn = True
+                            ui.label(" ".join(msgs)).classes("text-caption q-ml-md " + ("text-orange-9" if warn else "text-grey-7")).mark("layer_overlap")
                         @ui.refreshable
                         def layer_list():
                             for i, lay in enumerate(layers):
                                 with ui.row().classes("items-center q-gutter-sm"):
                                     _srcs = dict(all_sources()); _lsrc = lay.get("source", "emodnet2024")
                                     if _lsrc not in _srcs:                              # ruta a un fichero propio: opción propia
-                                        _srcs[_lsrc] = str(_lsrc)
-                                    ui.select(_srcs, value=_lsrc, label=t["bathy"]).props("dense").classes("sl-w-lg").on_value_change(lambda e, lay=lay: lay.update(source=e.value))
-                                    _lr = lay.get("region"); _lyaml = _lr if isinstance(_lr, dict) else None     # zona del YAML (rectángulo o polígono)
-                                    _lopts = {"": t["whole_domain"], **({YAML_ZONE: t["inu_zone_yaml"]} if _lyaml else {}),
+                                        _srcs[_lsrc] = Path(str(_lsrc)).name       # el nombre se lee; la ruta, en la ayuda emergente
+                                    _lsel = ui.select(_srcs, value=_lsrc, label=t["bathy"]).props("dense").classes("sl-w-lg").on_value_change(lambda e, lay=lay: lay.update(source=e.value))
+                                    if "/" in str(_lsrc):
+                                        _lsel.tooltip(str(_lsrc))
+                                    async def _browse_layer(lay=lay):
+                                        from .folder_picker import pick_file
+                                        s_ = str(lay.get("source", ""))
+                                        f = await pick_file(s_ if "/" in s_ else (case_path() or Path.home()).parent, t, BATHY_EXTS, title=t["browse_bathy"])
+                                        if f:
+                                            lay["source"] = f; layer_list.refresh()
+                                    ui.button(icon="folder_open", on_click=_browse_layer).props("flat dense round").tooltip(t["browse_bathy"]).mark("browse_layer")
+                                    _lr = lay.get("region"); _lyaml = _lr if isinstance(_lr, dict) else None     # zona propia: dibujada o del YAML
+                                    _lopts = {"": t["whole_domain"], **({YAML_ZONE: t["bathy_zone_own"]} if _lyaml else {}),
                                               **{rg.get("name", f"zona{j + 1}"): rg.get("name", f"zona{j + 1}") for j, rg in enumerate(regions)}}
-                                    def _set_lreg(e, lay=lay, keep=_lyaml):
+                                    @ui.refreshable
+                                    def _overlap(lay=lay):
+                                        overlap_note(lay)
+                                    def _set_lreg(e, lay=lay, keep=_lyaml, ov=_overlap):
                                         if e.value == YAML_ZONE:
                                             lay["region"] = keep
                                         elif e.value:
                                             lay["region"] = e.value
                                         else:
                                             lay.pop("region", None)
-                                    ui.select(_lopts, value=YAML_ZONE if _lyaml else safe_select(_lopts, _lr if isinstance(_lr, str) else "", "", label=t["regions"]),
-                                              label=t["regions"]).props("dense").classes("sl-w-md").on_value_change(_set_lreg)
+                                        ov.refresh(); redraw_soon()
+                                    ui.select(_lopts, value=YAML_ZONE if _lyaml else safe_select(_lopts, _lr if isinstance(_lr, str) else "", "", label=t["layer_zone"]),
+                                              label=t["layer_zone"]).props("dense").classes("sl-w-md").on_value_change(_set_lreg)
+                                    def _draw_zone(lay=lay):
+                                        pending["lay"] = lay; draw_target.set_value("bathy")
+                                        ui.notify(t["draw_bathy_go"], timeout=6000)
+                                    ui.button(icon="draw", on_click=_draw_zone).props("flat dense round").tooltip(t["draw_bathy_btn"]).mark("draw_layer_zone")
                                     ui.switch(t["land_only"], value=bool(lay.get("land_only", lay.get("source") in ("fabdem", "copdem30")))).props("dense").on_value_change(lambda e, lay=lay: lay.update(land_only=bool(e.value)))
-                                    ui.number(t["blend_km"], value=float(lay.get("blend_km", 1.0)), min=0, step=0.5).props("dense").classes("sl-w-sm").on_value_change(lambda e, lay=lay: lay.update(blend_km=float(e.value)))
-                                    ui.button(icon="close", on_click=lambda _, i=i: (layers.pop(i), layer_list.refresh())).props("flat dense round")
+                                    ui.number(t["blend_km"], value=float(lay.get("blend_km", 1.0)), min=0, step=0.5).props("dense").classes("sl-w-sm").on_value_change(lambda e, lay=lay, ov=_overlap: (lay.update(blend_km=float(e.value or 0)), ov.refresh()))
+                                    ui.button(icon="close", on_click=lambda _, i=i: (layers.pop(i), layer_list.refresh(), redraw_soon())).props("flat dense round")
+                                _overlap()
                         layer_list()
                         ui.button(t["add_layer"], icon="add", on_click=lambda: (layers.append({"source": "emodnet2024", "blend_km": 1.0}), layer_list.refresh())).props("flat")
 
@@ -1158,7 +1213,7 @@ def page_mesh():
                 shapes = {}                                         # id de la capa de Leaflet -> poligono (dominio o zona)
                 colors = {}                                         # id de la capa -> color (para pintar sus vertices al editar)
                 region_color = {}                                   # nombre de zona -> color (mapa, leyenda y tabla de zonas)
-                DOMAIN_COLOR = "#e63946"; INU_COLOR = "#0077b6"
+                DOMAIN_COLOR = "#e63946"; INU_COLOR = "#0077b6"; BATHY_COLORS = ["#795548", "#37474f", "#9c6d00", "#00695c"]
                 PALETTE = ["#f4a261", "#2a9d8f", "#7b2cbf", "#e9c46a", "#ff006e", "#8ac926", "#3a86ff", "#6d4c41"]
 
                 def inu_name():
@@ -1213,6 +1268,20 @@ def page_mesh():
                         shapes[lay_.id] = rg_; colors[lay_.id] = col
                         lmap.run_layer_method(lay_.id, "bindTooltip", rg_.get("name", ""), {"sticky": True})
                         items.append((col, f"{rg_.get('name', '')} · {float(rg_.get('size', 0)):g} m" + (f" · {t['draw_inu'].lower()}" if is_inu else ""), is_inu))
+                    for j_, lz in enumerate(layers):                 # zonas propias de las capas de batimetría: contorno punteado, sin refinar
+                        zr = lz.get("region")
+                        if not isinstance(zr, dict) or not (zr.get("polygon") or ("lon" in zr and "lat" in zr)):
+                            continue
+                        col = BATHY_COLORS[j_ % len(BATHY_COLORS)]
+                        opts = {"color": col, "weight": 3, "fillOpacity": 0.04, "dashArray": "2 6"}
+                        if zr.get("polygon"):
+                            lay_ = lmap.generic_layer(name="polygon", args=[[[p[1], p[0]] for p in zr["polygon"]], opts])
+                        else:
+                            lay_ = lmap.generic_layer(name="rectangle", args=[[[zr["lat"][0], zr["lon"][0]], [zr["lat"][1], zr["lon"][1]]], opts])
+                        nm_ = f"{t['bathy']}: {Path(str(lz.get('source', ''))).name}"
+                        shapes[lay_.id] = zr; colors[lay_.id] = col
+                        lmap.run_layer_method(lay_.id, "bindTooltip", nm_, {"sticky": True})
+                        items.append((col, nm_, True))
                     if inu_region.value == YAML_ZONE:                 # zona inundable escrita en el YAML (rectángulo o polígono)
                         opts = {"color": INU_COLOR, "weight": 3, "fillOpacity": 0.12, "dashArray": "6 4"}
                         if inu_yaml.get("polygon"):
@@ -1225,7 +1294,7 @@ def page_mesh():
                             with ui.row().classes("items-center no-wrap q-gutter-xs"):
                                 ui.element("span").style(f"display:inline-block;width:22px;height:12px;background:{col}33;border:2px {'dashed' if dash else 'solid'} {col};border-radius:2px")
                                 ui.label(lab)
-                    region_list.refresh()
+                    region_list.refresh(); layer_list.refresh()
 
                 @ui.refreshable
                 def region_list():
@@ -1334,6 +1403,18 @@ def page_mesh():
                         return
                     if draw_target.value == "domain":
                         poly.clear(); poly.extend(pts); edge_types.clear()
+                    elif draw_target.value == "bathy":                            # zona de una capa de batimetría: no refina la malla
+                        lons = [p[0] for p in pts]; lats = [p[1] for p in pts]
+                        if layer.get("_mRadius") is None and len(pts) != 4 or (len(pts) == 4 and len({round(p, 4) for p in lons}) > 2):
+                            zr = {"polygon": pts}
+                        else:
+                            zr = {"lon": [min(lons), max(lons)], "lat": [min(lats), max(lats)]}
+                        lay = pending["lay"] if any(l_ is pending["lay"] for l_ in layers) else None
+                        if lay is None:
+                            lay = {"source": "emodnet2024", "blend_km": 1.0}; layers.append(lay)
+                        lay["region"] = zr; pending["lay"] = None
+                        layers_exp.set_value(True); layer_list.refresh()
+                        ui.notify(t["bathy_zone_drawn"], type="positive", timeout=6000)
                     else:
                         lons = [p[0] for p in pts]; lats = [p[1] for p in pts]
                         names = {r_.get("name") for r_ in regions}

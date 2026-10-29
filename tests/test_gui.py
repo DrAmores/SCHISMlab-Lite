@@ -473,7 +473,7 @@ async def test_mesh_page_keeps_flood_zone_from_yaml(user: User, tmp_path):
 
 @requires_pro
 async def test_mesh_page_keeps_layer_zone_from_yaml(user: User, tmp_path):
-    """Una capa de batimetría con zona lon/lat del YAML se muestra como «zona del YAML» y se conserva al guardar."""
+    """Una capa de batimetría con zona lon/lat del YAML se muestra como «zona propia» y se conserva al guardar."""
     import yaml
     from nicegui import ui
     from nicegui.testing.user_interaction import UserInteraction
@@ -483,8 +483,8 @@ async def test_mesh_page_keeps_layer_zone_from_yaml(user: User, tmp_path):
                                     "resolution": {"min": 250, "max": 2500, "regions": []}}}
     p = tmp_path / "capa.yaml"; p.write_text(yaml.safe_dump(cfg))
     await user.open(f"/mesh?case={p}")
-    sel = [e for e in user.find(ui.select).elements if e._props.get("label") == "Zonas de alta resolución" and e.value == "__yaml__"]
-    assert sel, "la capa debería mostrar «zona del YAML»"
+    sel = [e for e in user.find(ui.select).elements if e._props.get("label") == "Zona de la capa" and e.value == "__yaml__"]
+    assert sel, "la capa debería mostrar «zona propia»"
     btn = [b for b in user.find(ui.button).elements if getattr(b, "text", "") == "Guardar"]
     UserInteraction(user, {btn[0]}, None).click()
     await user.should_see("Guardado")

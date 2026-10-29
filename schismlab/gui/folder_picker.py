@@ -1,5 +1,6 @@
-"""Explorador de carpetas del servidor (la interfaz va en el navegador y no hay diálogo nativo de carpetas): diálogo
-con la ruta actual, accesos rápidos, subcarpetas, subir un nivel, crear carpeta y «Elegir». Devuelve la ruta elegida."""
+"""Explorador de carpetas y ficheros del servidor (la interfaz va en el navegador y no hay diálogo nativo): diálogo con
+la ruta actual, accesos rápidos, subcarpetas, subir un nivel, crear carpeta y «Elegir». Devuelve la ruta elegida.
+pick_file hace lo mismo con los ficheros de unas extensiones (batimetría propia, …): un clic en el fichero lo elige."""
 from __future__ import annotations
 import os
 from pathlib import Path
@@ -24,14 +25,29 @@ def _subdirs(p: Path) -> list[Path]:
         return []
 
 
-async def pick_folder(start: str | Path | None, t: dict) -> str | None:
-    """Abre el diálogo y espera: ruta elegida (str) o None si se cancela."""
+def _files(p: Path, exts: tuple[str, ...]) -> list[Path]:
+    try:
+        return sorted((f for f in p.iterdir() if f.is_file() and f.suffix.lower() in exts and not f.name.startswith(".")),
+                      key=lambda f: f.name.lower())
+    except OSError:
+        return []
+
+
+async def pick_file(start: str | Path | None, t: dict, exts: tuple[str, ...], title: str | None = None) -> str | None:
+    """Diálogo para elegir un fichero del servidor con una de las extensiones `exts` (p. ej. (".tif", ".nc")): ruta o None."""
+    return await pick_folder(start, t, exts=tuple(e.lower() for e in exts), title=title)
+
+
+async def pick_folder(start: str | Path | None, t: dict, exts: tuple[str, ...] | None = None, title: str | None = None) -> str | None:
+    """Abre el diálogo y espera: ruta elegida (str) o None si se cancela. Con `exts`, lista también esos ficheros y
+    devuelve el que se pulse (no la carpeta)."""
     from .state import HOME
-    cur = {"p": Path(str(start or Path.home())).expanduser()}
+    s0 = Path(str(start or Path.home())).expanduser()
+    cur = {"p": s0.parent if (exts and s0.is_file()) else s0}
     if not cur["p"].is_dir():
         cur["p"] = Path.home()
     with ui.dialog() as dlg, ui.card().classes("q-pa-md").style("min-width:520px;max-width:90vw"):
-        ui.label(t["sim_folder"]).classes("text-subtitle1 text-weight-bold")
+        ui.label(title or (t["choose_file"] if exts else t["sim_folder"])).classes("text-subtitle1 text-weight-bold")
         path_in = ui.input(t["folder_path"], value=str(cur["p"])).props("dense outlined").classes("w-full")
         with ui.row().classes("q-gutter-xs wrap"):
             for lab, p in _shortcuts(HOME):
@@ -44,19 +60,25 @@ async def pick_folder(start: str | Path | None, t: dict) -> str | None:
         info = ui.label().classes("text-caption text-grey-7")
         with ui.row().classes("justify-end w-full"):
             ui.button(t["cancel"], on_click=lambda: dlg.submit(None)).props("flat")
-            ui.button(t["choose_folder"], icon="check", on_click=lambda: dlg.submit(str(cur["p"]))).props("color=accent unelevated")
+            if not exts:
+                ui.button(t["choose_folder"], icon="check", on_click=lambda: dlg.submit(str(cur["p"]))).props("color=accent unelevated")
 
         def render():
             listing.clear()
             subs = _subdirs(cur["p"])
             with listing:
-                if not subs:
-                    ui.label(t["no_subfolders"]).classes("text-caption text-grey-7 q-pa-sm")
+                fs = _files(cur["p"], exts) if exts else []
+                if not subs and not fs:
+                    ui.label(t["no_files"] if exts else t["no_subfolders"]).classes("text-caption text-grey-7 q-pa-sm")
                 for d in subs:
                     with ui.row().classes("items-center cursor-pointer q-px-sm q-py-xs hover-row w-full").on("click", lambda e, d=d: go(d)):
                         ui.icon("folder", color="amber-7"); ui.label(d.name)
+                for f in fs:
+                    with ui.row().classes("items-center cursor-pointer q-px-sm q-py-xs hover-row w-full").on("click", lambda e, f=f: dlg.submit(str(f))):
+                        ui.icon("description", color="blue-grey-6"); ui.label(f.name)
+                        ui.label(f"{f.stat().st_size / 1e6:.1f} MB").classes("text-caption text-grey-7")
             writable = os.access(cur["p"], os.W_OK)
-            info.set_text("" if writable else t["folder_not_writable"])
+            info.set_text(t["file_exts"].format(exts=", ".join(exts)) if exts else ("" if writable else t["folder_not_writable"]))
             path_in.set_value(str(cur["p"]))
 
         def go(p: Path):
